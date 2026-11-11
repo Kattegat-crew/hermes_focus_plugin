@@ -1,0 +1,59 @@
+manifest_version: 2
+api_version: 1
+name: neural-context-plugin
+version: "0.1.0"
+description: >-
+  Cognitive context engine for Hermes Agent: intercepts turns before inference,
+  extracts true intent and entities, prioritizes repository governance, selectively
+  ingests memory, and injects winning skills in a single step with zero KV-cache mutation.
+author: Jesús Díaz & NeuralCrew Labs
+license: MIT
+homepage: https://github.com/Kattegat-crew/neural-context-plugin
+requires_hermes: ">=0.21.6"
+kind: standalone
+tags:
+  - context-engine
+  - triage
+  - skills
+  - memory
+  - routing
+  - cost-control
+provides_tools:
+  - neural_context_status
+  - neural_context_route
+provides_hooks:
+  - pre_llm_call
+  - post_llm_call
+provides_middleware: []
+requires_env: []
+config_schema:
+  enabled:
+    type: bool
+    default: true
+  pre_hook_enabled:
+    type: bool
+    default: true
+  router_backend:
+    type: str
+    default: "host_llm"
+  max_context_tokens:
+    type: int
+    default: 1200
+  selective_memory_enabled:
+    type: bool
+    default: true
+  memory_token_budget:
+    type: int
+    default: 400
+  software_inspection_enabled:
+    type: bool
+    default: true
+  sidecar_db_path:
+    type: str
+    default: ""
+  receipts_path:
+    type: str
+    default: ""
+  timeout_ms:
+    type: int
+    default: 250

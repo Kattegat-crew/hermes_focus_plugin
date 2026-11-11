@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neural-context-plugin"
+version = "0.1.0"
+description = "Cognitive semantic triage, selective entity memory ingestion, and dynamic skill routing for Hermes Agent."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Jesús Díaz & NeuralCrew Labs Architecture Team", email = "engineering@neuralcrew.com" }
+]
+keywords = ["hermes", "hermes-agent", "plugin", "context-engine", "skills", "memory", "triage"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+jev = [
+    "requests>=2.28.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["neural_context"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
