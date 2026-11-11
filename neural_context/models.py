@@ -69,7 +69,7 @@ class TriageAnalysis(BaseModel):
     )
     semantic_concepts: List[str] = Field(
         default_factory=list,
-        description="Broad, uncoupled capability and domain concepts (e.g. ['marketing', 'leads', 'scripts', 'docker'])."
+        description="Broad, dynamic capability and domain concepts inferred by the model across any field of knowledge."
     )
     suggested_missing_skill: Optional[str] = Field(
         default=None,

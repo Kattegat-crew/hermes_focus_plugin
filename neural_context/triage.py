@@ -26,8 +26,8 @@ You must decide:
    - time_anchor: Temporal phrase if mentioned (e.g. "ayer", "yesterday", "last week", or null).
    - query_text: Clean search terms in the user's native language.
 
-3. Semantic Concepts for Skill Retrieval (Broad & Uncoupled):
-   - semantic_concepts: 3 to 6 broad capability or domain terms in English and technical terms (e.g. ["marketing", "leads", "copywriting", "docker", "api"]). Do NOT guess exact skill filenames; provide standard domain terms.
+3. Semantic Concepts for Skill Retrieval (Dynamic & Open-Domain):
+   - semantic_concepts: 3 to 6 dynamic domain and capability concepts representing whatever task the user needs across any field of knowledge (e.g. software development, physics simulation, video editing, legal auditing, financial analysis, or specialized science). Do NOT guess exact skill filenames; infer genuine domain concepts.
 
 4. Skill Gap Detection:
    - suggested_missing_skill: If a specialized task requires a skill that standard catalogs might lack, suggest a canonical capability slug (or null).
@@ -255,15 +255,16 @@ class CognitiveTriage:
         domain_info: DomainClassification
     ) -> TriageAnalysis:
         """
-        Grammatical intent induction used ONLY when the model endpoint is offline or unavailable.
-        Analyzes communicative modality (imperative, interrogative, declarative) and predicate clauses
-        WITHOUT hardcoded keyword dictionaries across languages.
+        Structural fallback used ONLY when the model endpoint is offline or unavailable.
+        Zero hardcoded keyword dictionaries, word matching, or linguistic assumptions.
+        Evaluates structural token length and quoted identifiers, defaulting to safe
+        fail-closed behavior when intent cannot be cognitively reasoned.
         """
         stripped = text.strip()
         words = stripped.split()
 
-        # Pure acknowledgements / extremely short non-clause expressions (< 3 tokens without predicate)
-        if len(words) <= 2 and not any(c in stripped for c in [":", "/", "\\", "{", "}", "?"]):
+        # Pure acknowledgements or trivial expressions (< 3 tokens without structure)
+        if len(words) <= 2 and not any(c in stripped for c in [":", "/", "\\", "{", "}", "=", "<", ">", "?"]):
             return TriageAnalysis(
                 route=CognitiveRoute.DIRECT_REPLY,
                 memory_probe=None,
@@ -272,74 +273,49 @@ class CognitiveTriage:
                 is_actionable_task=False,
                 needs_skills=False,
                 needs_memory=False,
-                intent_summary_en="Non-clause conversational token or acknowledgement.",
+                intent_summary_en="Short non-actionable token.",
                 search_query="",
                 required_capabilities=[],
                 extracted_entities=[],
                 domain=domain_info,
-                reasoning="Short communicative particle without an action predicate.",
-                confidence=0.8
+                reasoning="Short conversational expression without task structure.",
+                confidence=0.5
             )
 
-        # Extract potential named entities (capitalized proper nouns, quoted identifiers)
+        # Extract explicitly quoted identifiers or entities without linguistic assumptions
         quoted = re.findall(r'["\']([^"\']+)["\']', text)
         entities = list(quoted)
-        for w in words:
-            if w[0].isupper() and len(w) > 2 and w not in entities:
-                entities.append(w)
 
-        # Check for historical memory inquiry signals across languages
-        is_interrogative = stripped.endswith("?") or stripped.startswith(("¿", "?", "what", "how", "when", "quién", "qué", "cuándo", "cómo", "rappelle", "erinner"))
-        has_memory_signal = bool(entities) or any(t in stripped.lower() for t in [
-            "acord", "ayer", "yesterday", "last", "entrega", "historial", "decidi", "hablamos", "previous", "earlier", "rappel", "accord"
-        ])
-        has_exec_verb = any(verb in stripped.lower() for verb in [
-            "crea", "build", "run", "ejecuta", "programa", "code", "escribe", "write", "make", "genera", "generate"
-        ])
-
-        if is_interrogative and has_memory_signal and not has_exec_verb:
-            route = CognitiveRoute.MEMORY_ONLY
-            is_actionable = False
-            needs_skills = False
-            needs_memory = True
-        elif entities and has_memory_signal:
+        # In offline fallback without LLM inference, route structurally based on presence of explicit entities
+        if entities:
             route = CognitiveRoute.ENRICHED_TASK
             is_actionable = True
             needs_skills = True
             needs_memory = True
+            memory_probe = MemoryProbe(
+                entity=entities[0],
+                query_text=stripped
+            )
         else:
             route = CognitiveRoute.SKILL_ONLY
             is_actionable = True
             needs_skills = True
             needs_memory = False
-
-        memory_probe = None
-        if needs_memory:
-            memory_probe = MemoryProbe(
-                entity=entities[0] if entities else None,
-                topic=stripped[:100],
-                query_text=stripped
-            )
-
-        # Extract broad concept words (alphanumeric words >= 4 chars)
-        concepts = [w.lower() for w in re.findall(r"[\w]{4,}", stripped) if w.lower() not in {"this", "that", "para", "with", "from", "sobre", "como"}]
-
-        # Formulate dual query in English
-        query_en = f"When the user needs to execute: {stripped} — execute {stripped}"
+            memory_probe = None
 
         return TriageAnalysis(
             route=route,
             memory_probe=memory_probe,
-            semantic_concepts=concepts[:5],
+            semantic_concepts=[],
             suggested_missing_skill=None,
             is_actionable_task=is_actionable,
             needs_skills=needs_skills,
             needs_memory=needs_memory,
-            intent_summary_en=f"Execute task: {stripped[:200]}",
-            search_query=query_en if needs_skills else "",
-            required_capabilities=concepts[:5],
+            intent_summary_en=f"Task: {stripped[:200]}",
+            search_query="",
+            required_capabilities=[],
             extracted_entities=entities[:5],
             domain=domain_info,
-            reasoning=f"Offline grammatical induction selected {route.value}.",
-            confidence=0.75
+            reasoning=f"Offline structural fallback routed to {route.value} without keyword dictionaries.",
+            confidence=0.5
         )
