@@ -145,6 +145,15 @@ plugins:
 
 ---
 
+## Security & Fail-Closed Boundaries
+
+- **Untrusted Context Encapsulation**: Injected skills and memory facts are wrapped in strict `<neural_context>` XML tags with explicit procedural scoping, ensuring retrieved third-party text cannot hijack model persona or execute unauthorized commands.
+- **Strict Fail-Closed Architecture**: If parsing, network routing, or sidecar lookup exceeds the timeout deadline (default: 250ms) or encounters an error, the engine defaults safely to `DIRECT_REPLY` with zero context injected. The user turn proceeds normally without interruption.
+- **Zero File Mutation**: User `SKILL.md` catalogs and workspace files are strictly immutable. Content hashes and procedural descriptions are stored in a local SQLite sidecar (`sidecar_index.db`).
+- **Read-Only Memory Sandboxing**: Memory scans enforce strict directory allowlists, symlink boundary checks, and escaped wildcard queries (`ESCAPE '\'`), preventing directory traversal or query injection.
+
+---
+
 ## Verification & Tests
 
 ```bash
