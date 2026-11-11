@@ -82,10 +82,52 @@ def test_triage_software_task_with_governance_detection():
 
 
 def test_triage_offline_grammatical_induction():
-    # When no model is provided (e.g. offline fallback), tests grammatical induction
+    # When no model is provided (e.g. offline fallback), tests structural fallback
     triage = CognitiveTriage()
     result = triage.analyze("Escribe un informe de auditoría para el cliente 'AcmeCorp'")
 
     assert result.is_actionable_task is True
     assert "AcmeCorp" in result.extracted_entities
     assert result.needs_skills is True
+
+
+def test_triage_multidimensional_memory_framework():
+    """
+    Tests that the Cognitive Arbiter decomposes memory inquiries multidimensionally:
+    - Normalizes colloquial phrasing ("lo que quedamos") to documentation vocabulary ("acuerdos").
+    - Preserves native interaction language ('es').
+    - Dispatches MEMORY_ONLY route with exact topic and temporal anchor.
+    """
+    import json
+    from neural_context.models import CognitiveRoute
+
+    def mock_model(prompt: str) -> str:
+        return json.dumps({
+            "route": "MEMORY_ONLY",
+            "detected_language": "es",
+            "memory_probe": {
+                "entity": None,
+                "topic": "acuerdos entrega api backend",
+                "time_anchor": "ayer",
+                "query_text": "acuerdos entrega api backend viernes"
+            },
+            "semantic_concepts": [],
+            "suggested_missing_skill": None,
+            "intent_summary_en": "Recall API delivery agreements made yesterday",
+            "search_query": "",
+            "is_software_task": False,
+            "detected_stack": [],
+            "reasoning": "Memory recall inquiry regarding yesterday agreements without tool execution."
+        })
+
+    triage = CognitiveTriage(model_fn=mock_model)
+    result = triage.analyze("¿Qué fue lo que quedamos ayer sobre la entrega de la API?")
+
+    assert result.route == CognitiveRoute.MEMORY_ONLY
+    assert result.detected_language == "es"
+    assert result.needs_memory is True
+    assert result.needs_skills is False
+    assert result.memory_probe is not None
+    assert result.memory_probe.detected_language == "es"
+    assert "acuerdos" in result.memory_probe.topic
+    assert result.memory_probe.time_anchor == "ayer"

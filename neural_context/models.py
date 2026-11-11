@@ -41,6 +41,10 @@ class MemoryProbe(BaseModel):
         default="",
         description="Search phrase preserved in the interaction language for lexical/semantic memory matching."
     )
+    detected_language: str = Field(
+        default="auto",
+        description="ISO language code of interaction (e.g. 'es', 'en', 'fr')."
+    )
 
 
 class DomainClassification(BaseModel):
@@ -62,6 +66,10 @@ class TriageAnalysis(BaseModel):
     route: CognitiveRoute = Field(
         default=CognitiveRoute.SKILL_ONLY,
         description="Explicit 4-quadrant cognitive route decided by the Arbiter."
+    )
+    detected_language: str = Field(
+        default="auto",
+        description="Detected ISO language code of the interaction."
     )
     memory_probe: Optional[MemoryProbe] = Field(
         default=None,

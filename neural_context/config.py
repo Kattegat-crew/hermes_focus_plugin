@@ -28,6 +28,19 @@ def get_plugin_data_dir() -> Path:
         return d
 
 
+def get_hermes_language() -> str:
+    """Resolve the active Hermes language setting (HERMES_LANGUAGE or display.language)."""
+    env_lang = os.environ.get("HERMES_LANGUAGE")
+    if env_lang:
+        return env_lang.strip()
+    try:
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly() or {}
+        return str((cfg.get("display") or {}).get("language", "")).strip()
+    except Exception:
+        return ""
+
+
 class PluginConfig(BaseModel):
     enabled: bool = True
     pre_hook_enabled: bool = True

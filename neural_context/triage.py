@@ -6,52 +6,69 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from .config import get_hermes_language
 from .models import CognitiveRoute, DomainClassification, MemoryProbe, TriageAnalysis
 
 
 TRIAGE_SYSTEM_PROMPT = """You are the Cognitive Semantic Arbiter for Hermes Agent's Neural Context Engine.
-You read user messages in ANY human language (multilingual: English, Spanish, French, German, Chinese, Japanese, etc.) and perform a deep cognitive analysis of the intent.
+You read user messages across ANY human language, platform channel, and domain of knowledge, performing deep cognitive intent reasoning.
 
-You must decide:
-1. Route Classification (Select exactly ONE of 4 routes):
-   - "DIRECT_REPLY": Casual chat, greetings, trivial affirmations, simple conceptual Q&A, or general answers requiring NO external procedural skills and NO historical memory recall.
-   - "SKILL_ONLY": The user requests a procedural action or tool usage (e.g. web search, file processing, writing a script) that does NOT depend on historical memory or agreements.
-   - "MEMORY_ONLY": The user asks about historical agreements, past decisions, client facts, or previous session context, WITHOUT requesting a complex procedural tool execution.
-   - "ENRICHED_TASK": Complex domain task tied to past history/client facts (requires recalling memory facts first, then routing procedural skills).
+================================================================================
+SECTION 1: COGNITIVE MEMORY REASONING FRAMEWORK
+================================================================================
+When the user query implies recalling past interactions, agreements, client facts, configurations, or historical decisions:
+1. Multidimensional Decomposition (Who, What, When, Where):
+   - WHO / PROJECT: Extract specific client name, brand, repository, or project context (or null if general).
+   - WHAT: Isolate the core informational object: agreement, architecture decision, credentials/keys, bug/incident, business constraint, or deliverable.
+   - WHEN: Identify temporal anchors (e.g., 'yesterday', 'last sprint', 'previous turn', 'last week').
+   - WHERE: Identify environment or platform scope (e.g., 'production', 'staging', 'database', 'landing page', 'github').
+2. Document Vocabulary Normalization:
+   Human speech is conversational and colloquial ("lo que pactamos", "what we decided", "las claves del server").
+   Normalize colloquial references into factual documentation terminology ("acuerdos", "decisiones", "credenciales", "especificaciones", "compromisos") that matches how engineers document facts in MEMORY.md files.
+3. Strict Native Language Preservation:
+   The memory probe (topic, time_anchor, query_text) MUST remain in the EXACT interaction language used by the user. NEVER translate memory probes to English if the user speaks another language, because local memory files (MEMORY.md, USER.md, PROJECT_MEMORY.md) are recorded in the interaction language.
+4. Absence Certainty (Anti-Hallucination):
+   Formulate the memory probe thoroughly across these dimensions so that if the memory search returns empty, the agent can be 100% certain that no prior record exists, preventing factual hallucination.
 
-2. Memory Probe (Preserve Native Interaction Language):
-   - If memory is needed (MEMORY_ONLY or ENRICHED_TASK), formulate the search query in the USER'S NATIVE LANGUAGE without artificial translation.
-   - entity: Specific client name, brand, or project if mentioned (or null).
-   - topic: Subject, agreement, or topic in the native language (e.g. "acuerdo entrega api").
-   - time_anchor: Temporal phrase if mentioned (e.g. "ayer", "yesterday", "last week", or null).
-   - query_text: Clean search terms in the user's native language.
+================================================================================
+SECTION 2: COGNITIVE SKILL REASONING FRAMEWORK
+================================================================================
+When the user requests executing a procedural task, development action, technical analysis, or specialized tool workflow:
+1. Dynamic Open-Domain Abstraction:
+   Extract 3 to 6 broad, dynamic capability and domain concepts in canonical English representing the exact nature of the work across ANY field of knowledge (e.g. software engineering, bioinformatics, astrophysics, financial auditing, video rendering, devops, smart contracts, copywriting).
+2. Broad-Net Affine Coverage:
+   Do NOT attempt to guess specific skill filenames or hyphens. Use standard, widely accepted industry domain nouns. This guarantees the bipartite graph spreading activation will intersect any relevant skill procedure in the catalog if one exists.
+3. Skill Gap Guarantee:
+   Because your capability terms cast a comprehensive, high-recall net over the catalog, if the graph returns no matching skill candidate, you can authoritatively specify 'suggested_missing_skill' knowing with mathematical certainty that the catalog genuinely lacks this capability.
 
-3. Semantic Concepts for Skill Retrieval (Dynamic & Open-Domain):
-   - semantic_concepts: 3 to 6 dynamic domain and capability concepts representing whatever task the user needs across any field of knowledge (e.g. software development, physics simulation, video editing, legal auditing, financial analysis, or specialized science). Do NOT guess exact skill filenames; infer genuine domain concepts.
+================================================================================
+SECTION 3: 4-QUADRANT ROUTE CLASSIFICATION
+================================================================================
+Classify the turn into exactly ONE route:
+- DIRECT_REPLY: Pure conversational courtesies, greetings, acknowledgements, or simple general knowledge Q&A that requires NEITHER historical memory NOR procedural external skills (0 tokens injected).
+- SKILL_ONLY: The user requests a procedural action or tool usage with NO historical context dependency.
+- MEMORY_ONLY: The user asks about historical facts, agreements, decisions, or past session context, WITHOUT requesting a complex procedural tool execution.
+- ENRICHED_TASK: Complex domain task tied to historical context (executes Phase 1 memory probe to ground facts, then Phase 2 memory-enriched skill routing).
 
-4. Skill Gap Detection:
-   - suggested_missing_skill: If a specialized task requires a skill that standard catalogs might lack, suggest a canonical capability slug (or null).
-
-5. Software Domain:
-   - is_software_task: true/false.
-   - detected_stack: detected technologies (e.g. ["python", "docker"]).
-
-OUTPUT FORMAT (Pure JSON):
+================================================================================
+OUTPUT SPECIFICATION (Pure JSON only):
+================================================================================
 {
   "route": "DIRECT_REPLY" | "SKILL_ONLY" | "MEMORY_ONLY" | "ENRICHED_TASK",
+  "detected_language": "en" | "es" | "fr" | "de" | "zh" | "ja" | "auto",
   "memory_probe": {
     "entity": "Name or null",
-    "topic": "Topic in user language or null",
-    "time_anchor": "Time anchor or null",
-    "query_text": "Search terms in user language"
+    "topic": "Normalized topic in user language or null",
+    "time_anchor": "Time anchor in user language or null",
+    "query_text": "Target search terms in user language"
   },
-  "semantic_concepts": ["concept1", "concept2"],
-  "suggested_missing_skill": null,
-  "intent_summary_en": "1-sentence imperative description in English",
+  "semantic_concepts": ["concept1", "concept2", "concept3"],
+  "suggested_missing_skill": "skill-name or null",
+  "intent_summary_en": "Standardized 1-sentence imperative description in English",
   "search_query": "When the user needs to <action> — <imperative> <action>",
-  "is_software_task": false,
+  "is_software_task": true/false,
   "detected_stack": [],
-  "reasoning": "1 sentence explaining the selected route"
+  "reasoning": "1 sentence cognitive explanation of the decision"
 }
 """
 
@@ -119,7 +136,9 @@ class CognitiveTriage:
 
     def _call_model(self, user_text: str) -> Optional[str]:
         """Invokes the model facade (ctx.llm, custom model_fn, or structured prompt)."""
-        prompt = f"{TRIAGE_SYSTEM_PROMPT}\n\nUSER MESSAGE:\n\"{user_text}\"\n\nJSON RESPONSE:"
+        hermes_locale = get_hermes_language()
+        locale_directive = f"\n[Hermes Configured Locale: {hermes_locale}]\n" if hermes_locale else ""
+        prompt = f"{TRIAGE_SYSTEM_PROMPT}{locale_directive}\n\nUSER MESSAGE:\n\"{user_text}\"\n\nJSON RESPONSE:"
 
         # Case A: Custom model callable injected (useful for tests or dedicated local LLM)
         if self.model_fn is not None:
@@ -210,6 +229,10 @@ class CognitiveTriage:
                             query_text=original_text
                         )
 
+                    detected_lang = str(data.get("detected_language") or "auto").strip().lower()
+                    if memory_probe:
+                        memory_probe.detected_language = detected_lang
+
                     intent_en = str(data.get("intent_summary_en", "")).strip()
                     search_query = str(data.get("search_query", "")).strip()
                     suggested_missing = data.get("suggested_missing_skill")
@@ -228,6 +251,7 @@ class CognitiveTriage:
 
                     return TriageAnalysis(
                         route=route,
+                        detected_language=detected_lang,
                         memory_probe=memory_probe,
                         semantic_concepts=semantic_concepts,
                         suggested_missing_skill=suggested_missing_skill,
