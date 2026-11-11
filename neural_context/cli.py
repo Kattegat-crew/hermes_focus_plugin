@@ -12,7 +12,7 @@ from .sidecar import SidecarIndex
 
 
 def register_cli(subparser: argparse.ArgumentParser) -> None:
-    """Build the `hermes neural-context` argparse subcommands tree."""
+    """Build the `hermes focus` argparse subcommands tree."""
     sub = subparser.add_subparsers(dest="subcommand", help="Available subcommands")
 
     sub.add_parser("status", help="Print current plugin status, config, and index summary.")
@@ -31,8 +31,8 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """Standalone parser for testing or direct CLI execution."""
     parser = argparse.ArgumentParser(
-        prog="hermes neural-context",
-        description="Neural Context CLI: manage sidecar index, verify audit receipts, and run diagnostics."
+        prog="hermes focus",
+        description="Focus CLI: manage sidecar index, configure settings, verify receipts, and run diagnostics."
     )
     register_cli(parser)
     return parser
@@ -43,7 +43,7 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
 
     if cmd == "status":
         stats = receipt_emitter.get_summary_stats()
-        print("=== Neural Context Plugin Status ===")
+        print("=== Focus Plugin Status ===")
         print(f"  Plugin Enabled       : {config.enabled}")
         print(f"  Pre-Hook Enabled     : {config.pre_hook_enabled}")
         print(f"  Router Backend       : {config.router_backend}")
@@ -55,7 +55,7 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
         return 0
 
     if cmd == "doctor":
-        print("=== Running Neural Context Doctor Diagnostics ===")
+        print("=== Running Focus Doctor Diagnostics ===")
         problems: List[str] = []
 
         # 1. Check DB Path
@@ -102,7 +102,7 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
         stats = receipt_emitter.get_summary_stats(limit=limit)
         token_pct = stats.get('token_reduction_pct', 0.0)
         fast_exit_pct = stats.get('fast_exit_pct', 0.0)
-        print(f"=== Neural Context Verifiable Receipts (Last {limit} turns) ===")
+        print(f"=== Focus Verifiable Receipts (Last {limit} turns) ===")
         print(f"  Turns Audited       : {stats.get('total_turns', 0)}")
         print(f"  Skills Routed       : {stats.get('skills_routed', 0)}")
         print(f"  Token Reduction     : {token_pct}% saved vs static preloading")
@@ -126,7 +126,7 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
 
                 plugins = raw_cfg.setdefault("plugins", {})
                 entries = plugins.setdefault("entries", {})
-                nc = entries.setdefault("neural-context-plugin", {})
+                nc = entries.setdefault("focus", {})
                 settings = nc.setdefault("settings", {})
 
                 if val.lower() in ("true", "false"):
@@ -145,7 +145,7 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
                 print(f"[ERROR] Could not update config: {e}")
                 return 1
 
-        print("=== Neural Context Configuration Settings ===")
+        print("=== Focus Configuration Settings ===")
         print(f"  enabled                     : {config.enabled} (Active state)")
         print(f"  pre_hook_enabled            : {config.pre_hook_enabled} (pre_llm_call interception)")
         print(f"  router_backend              : {config.router_backend} (host_llm | graph | jev)")
@@ -155,7 +155,7 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
         print(f"  software_inspection_enabled : {config.software_inspection_enabled} (Detect AGENTS.md & local skills)")
         print(f"  timeout_ms                  : {config.timeout_ms} ms (Pre-inference deadline)")
         print("\nTo update a parameter:")
-        print("  hermes neural-context config --set max_context_tokens=1500")
+        print("  hermes focus config --set max_context_tokens=1500")
         print("Or edit directly via:")
         print("  hermes config edit")
         return 0

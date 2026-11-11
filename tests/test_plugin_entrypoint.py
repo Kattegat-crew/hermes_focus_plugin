@@ -27,15 +27,15 @@ def test_plugin_registration_and_schemas():
         schema = call.kwargs.get("schema")
         registered_tools[name] = schema
 
-    assert "neural_context_status" in registered_tools
-    assert "neural_context_route" in registered_tools
+    assert "focus_status" in registered_tools
+    assert "focus_route" in registered_tools
 
     # Crucial check: schema is directly {"name": ..., "parameters": ...}, NOT wrapped in {"type": "function", "function": ...}
-    status_schema = registered_tools["neural_context_status"]
+    status_schema = registered_tools["focus_status"]
     assert "parameters" in status_schema
     assert "function" not in status_schema
 
-    route_schema = registered_tools["neural_context_route"]
+    route_schema = registered_tools["focus_route"]
     assert "parameters" in route_schema
     assert "function" not in route_schema
     assert "query" in route_schema["parameters"]["properties"]

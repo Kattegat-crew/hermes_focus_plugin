@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "neural-context-plugin"
+name = "focus"
 version = "0.1.0"
-description = "Cognitive semantic triage, selective entity memory ingestion, and dynamic skill routing for Hermes Agent."
+description = "Focus: Cognitive semantic triage, selective entity memory ingestion, and dynamic skill routing for Hermes Agent."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

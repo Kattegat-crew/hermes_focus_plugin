@@ -1,4 +1,4 @@
-# Neural Context Plugin — Official Hackathon Demo Video Script
+# Focus Plugin (`focus`) — Official Hackathon Demo Video Script
 **Target Duration:** 75–85 seconds (Strictly < 90 seconds requirement)  
 **Channel:** X (Twitter) post tagging `@NousResearch`  
 **Authors:** Jesús Díaz (Jemadiar) & NeuralCrew Labs Architecture Team  
@@ -30,7 +30,7 @@
 ## Scene 2: The Solution — Intelligent, Selective Context Triage (00:20 - 00:45)
 
 ### Visuals
-- Introduce **Neural Context Plugin**.
+- Introduce **Focus**.
 - Show the native `pre_llm_call` hook intercepting incoming messages before the main model runs.
 - **Demonstration A (Conversational Greeting)**:
   - User types: `"Hola, ¿cómo estás?"`
@@ -40,9 +40,9 @@
   - User types: `"Revisa lo de AcmeCorp"` (shorthand, doesn't mention the underlying tech stack).
 
 ### Audio / Voiceover
-> *"Meet Neural Context Plugin.*
+> *"Meet Focus.*
 > 
-> *Instead of blindly dumping your entire memory and skill library into every prompt, Neural Context intercepts the interaction right before inference, performing intelligent, selective triage.*
+> *Instead of blindly dumping your entire memory and skill library into every prompt, Focus intercepts the interaction right before inference, performing intelligent, selective triage.*
 > 
 > *On casual conversation, it exits immediately with zero overhead. But when faced with an actual task, it analyzes true communicative intent and identifies the exact facts and tools needed."*
 
@@ -72,8 +72,8 @@
 ### Visuals
 - Quick terminal run of the built-in management commands:
   ```bash
-  hermes neural-context config
-  hermes plugins validate .
+  hermes focus config
+  hermes plugins validate . --json
   hermes plugins doctor .
   ```
 - Highlight:
@@ -107,9 +107,9 @@
 > *Pero con el tiempo notas un problema silencioso: las respuestas tardan más en llegar y el consumo de tokens en cada turno es cada vez mayor. ¿Por qué ocurre esto? Porque en cada interacción el agente debe leer, procesar y analizar acumulaciones masivas de memoria y catálogos completos de herramientas que muchas veces ni siquiera necesita para la tarea actual."*
 
 ### Escena 2: Análisis y Carga Inteligente (00:20 - 00:45)
-> *"Para resolver esto creamos Neural Context Plugin.*
+> *"Para resolver esto creamos Focus.*
 > 
-> *En lugar de sobrecargar al modelo con todo el historial y todas las skills en cada consulta, nuestro plugin intercepta la interacción justo antes de la inferencia, realizando un análisis y selección inteligente.*
+> *En lugar de sobrecargar al modelo con todo el historial y todas las skills en cada consulta, Focus intercepta la interacción justo antes de la inferencia, realizando un análisis y selección inteligente.*
 > 
 > *Si el usuario simplemente saluda o conversa, el plugin lo detecta al instante y sale sin inyectar nada innecesario. Y cuando detecta una tarea real, interpreta la intención comunicativa y localiza únicamente los hechos y herramientas esenciales."*
 
@@ -132,13 +132,13 @@
 ```text
 Tired of your Hermes Agent slowing down and burning tokens as your memory and skill catalog grow? 🧠⚡
 
-Introducing Neural Context Plugin for @NousResearch Hermes Agent:
+Introducing Focus for @NousResearch Hermes Agent:
 
 Problem:
 As you customize your agent, memory files expand and skills multiply. Reading massive context on every turn drives up latency and wastes tokens—even on simple greetings.
 
 Solution:
-Neural Context intercepts turns before inference:
+Focus intercepts turns before inference:
 ✅ Cognitive Arbiter: Instant zero-token fast exit on casual chat
 ✅ Two-Phase Enriched Routing: Surgical memory facts ground precise skill discovery
 ✅ Single-Step Ephemeral Delivery: Preserves byte-stable System Prompt for maximum KV-cache hits
@@ -152,5 +152,5 @@ hermes plugins install Kattegat-crew/neural-context-plugin
 
 GitHub: https://github.com/Kattegat-crew/neural-context-plugin
 
-#HermesAgent #NousResearch #AI #AgenticAI #OpenSource #ContextEngineering
+#HermesAgent #NousResearch #AI #AgenticAI #OpenSource #ContextEngineering #Focus
 ```

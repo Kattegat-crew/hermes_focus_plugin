@@ -1,4 +1,4 @@
-# Neural Context Plugin (`neural-context-plugin`)
+# Focus (`focus`)
 
 [![Hermes Agent Plugin](https://img.shields.io/badge/hermes--agent-plugin%20v1-blue.svg)](https://hermes-agent.nousresearch.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -6,7 +6,7 @@
 [![Doctor](https://img.shields.io/badge/hermes%20plugins%20doctor-healthy-brightgreen.svg)]()
 [![Tests](https://img.shields.io/badge/pytest-35%20passed-brightgreen.svg)]()
 
-> **Cognitive semantic context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
+> **Cognitive context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
 
 ---
 
@@ -23,7 +23,7 @@ In production LLM agent environments, context provisioning faces compound scalin
 
 ## The Architecture: Two-Phase Context-Enriched Routing
 
-`neural-context-plugin` hooks natively into `pre_llm_call` to resolve context before the primary agent model executes:
+`focus` hooks natively into `pre_llm_call` to resolve context before the primary agent model executes:
 
 ```
                           [ Incoming User Message ]
@@ -107,32 +107,32 @@ hermes plugins install Kattegat-crew/neural-context-plugin
 ### CLI Subcommands
 ```bash
 # Check status and health metrics
-hermes neural-context status
+hermes focus status
 
 # Run plugin diagnostic checks
-hermes neural-context doctor
+hermes focus doctor
 
 # Index local and catalog skills into sidecar SQLite cache
-hermes neural-context index
+hermes focus index
 
 # View or update plugin settings directly from the terminal
-hermes neural-context config
-hermes neural-context config --set max_context_tokens=1500
+hermes focus config
+hermes focus config --set max_context_tokens=1500
 
 # Verify recent turn receipts and routing history
-hermes neural-context verify --limit 20
+hermes focus verify --limit 20
 ```
 
 ---
 
 ## Configuration (`config.yaml`)
 
-Configure `neural-context-plugin` within your Hermes `config.yaml`:
+Configure `focus` within your Hermes `config.yaml`:
 
 ```yaml
 plugins:
   entries:
-    neural-context-plugin:
+    focus:
       enabled: true
       settings:
         router_backend: "host_llm"      # "host_llm" (default, uses ctx.llm) | "graph" | "jev"
@@ -148,11 +148,11 @@ plugins:
 ## Verification & Tests
 
 ```bash
-# Run pytest test suite (34 passing tests)
+# Run pytest test suite (35 passing tests)
 pytest -v
 
 # Run official Hermes Plugin validation (15/15 checks passed)
-hermes plugins validate .
+hermes plugins validate . --json
 
 # Run official Hermes Plugin doctor (healthy)
 hermes plugins doctor .

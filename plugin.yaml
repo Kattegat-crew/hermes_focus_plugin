@@ -1,9 +1,9 @@
 manifest_version: 2
 api_version: 1
-name: neural-context-plugin
+name: focus
 version: "0.1.0"
 description: >-
-  Cognitive context engine for Hermes Agent: intercepts turns before inference,
+  Focus: Cognitive context engine for Hermes Agent. Intercepts turns before inference,
   extracts true intent and entities, prioritizes repository governance, selectively
   ingests memory, and injects winning skills in a single step with zero KV-cache mutation.
 author: Jesús Díaz & NeuralCrew Labs
@@ -12,6 +12,7 @@ homepage: https://github.com/Kattegat-crew/neural-context-plugin
 requires_hermes: ">=0.21.6"
 kind: standalone
 tags:
+  - focus
   - context-engine
   - triage
   - skills
@@ -19,8 +20,8 @@ tags:
   - routing
   - cost-control
 provides_tools:
-  - neural_context_status
-  - neural_context_route
+  - focus_status
+  - focus_route
 provides_hooks:
   - pre_llm_call
   - post_llm_call

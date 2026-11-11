@@ -70,7 +70,7 @@ def test_cli_config_view_and_set(tmp_path, capsys, monkeypatch):
     ret = handle_cli(args, config, None, None)
     assert ret == 0
     captured = capsys.readouterr()
-    assert "Neural Context Configuration Settings" in captured.out
+    assert "Focus Configuration Settings" in captured.out
     assert "max_context_tokens" in captured.out
 
     # Test setting a parameter via CLI

@@ -1,4 +1,4 @@
-# Neural Context Plugin (`neural-context-plugin`)
+# Focus Plugin (`focus`)
 ## Technical Specification & Architecture Design
 **Target Runtime:** Hermes Agent (`v0.22.x` - `v0.23.x`)  
 **Standard:** Hermes Agent Plugins v1 (`plugin.yaml` + Python backend)  
@@ -24,7 +24,7 @@ Preload all skills & full memory                                  on_demand: tru
 2. **Memory Overload**: Unfiltered memory dumps inject irrelevant historical facts from unrelated projects, muddying reasoning context and driving up token expenditure.
 3. **The Limitation of Naive Lexical Matching**: Real-world user queries are frequently ambiguous, conversational, or written in another language (e.g., Spanish prompts against an English catalog). Users describe the **problem or business goal**, not the skill name. Simple keyword search or flat BM25 on the raw prompt often fails when user queries omit canonical skill terminology or span multi-domain goals.
 
-### The Solution: `neural-context-plugin`
+### The Solution: `focus`
 An intelligent, pre-inference cognitive context engine registered at the native `pre_llm_call` hook. It interprets the true technical intent of the user, executes a **Two-Phase Context-Enriched Routing Pipeline** (where selective memory facts provide ground-truth domain hints to guide procedural skill selection), queries a lightweight SHA256-hashed sidecar index, loads the winning skill in a single step, and injects ephemeral context into the user turn—**preserving KV-cache stability while eliminating redundant round-trips**.
 
 ---
@@ -201,7 +201,7 @@ class JevRouter(SkillRouterBackend):
 ```
 
 ### 4.3 Verifiable Audit Receipt (`receipt.py`)
-Every turn intercepted by the plugin produces a deterministic, verifiable JSON audit receipt recorded in `ctx.plugin_data_dir() / "receipts.jsonl"` and accessible via CLI (`hermes neural-context verify`):
+Every turn intercepted by the plugin produces a deterministic, verifiable JSON audit receipt recorded in `ctx.plugin_data_dir() / "receipts.jsonl"` and accessible via CLI (`hermes focus verify`):
 
 ```json
 {
@@ -238,7 +238,7 @@ Every turn intercepted by the plugin produces a deterministic, verifiable JSON a
 
 - [x] Dedicated Git Repository: [`/opt/neural-context-plugin`](file:///opt/neural-context-plugin) (`git@github.com:Kattegat-crew/neural-context-plugin.git`).
 - [x] Core Python Package: `neural_context` (`sidecar.py`, `triage.py`, `router.py`, `memory.py`, `receipt.py`, `cli.py`, `config.py`, `models.py`).
-- [x] Hermes Plugin Wrapper: `plugin.yaml`, `__init__.py` (registers `pre_llm_call`, `post_llm_call`, `neural-context` CLI, and `neural_context_status` / `neural_context_route` tools).
+- [x] Hermes Plugin Wrapper: `plugin.yaml`, `__init__.py` (registers `pre_llm_call`, `post_llm_call`, `focus` CLI, and `focus_status` / `focus_route` tools).
 - [x] Pytest Suite: 35 deterministic unit tests (100% passing) covering cognitive triage, 4-quadrant routing, universal memory adaptability (Markdown & SQLite), sidecar BM25, and CLI diagnostics (including interactive config).
 - [x] Hermes Plugin Validation: Passed `hermes plugins validate` (15/15 checks ok, 0 errors, 0 warnings).
 - [x] Hermes Plugin Doctor: Passed `hermes plugins doctor` (100% green, 2 tools, 2 hooks registered).

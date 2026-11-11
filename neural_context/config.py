@@ -20,10 +20,10 @@ def get_plugin_data_dir() -> Path:
     """Resolve the canonical Hermes plugin data directory: <hermes_home>/plugin-data/<name>/."""
     try:
         from plugins.plugin_storage import plugin_data_dir
-        return plugin_data_dir("neural-context-plugin")
+        return plugin_data_dir("focus")
     except Exception:
         home = get_hermes_home()
-        d = home / "plugin-data" / "neural-context-plugin"
+        d = home / "plugin-data" / "focus"
         d.mkdir(parents=True, exist_ok=True)
         return d
 

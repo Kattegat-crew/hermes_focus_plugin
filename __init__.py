@@ -26,7 +26,7 @@ from neural_context.router import ContextCoordinator
 from neural_context.sidecar import SidecarIndex
 from neural_context.triage import CognitiveTriage
 
-PLUGIN_NAME = "neural-context-plugin"
+PLUGIN_NAME = "focus"
 PLUGIN_VERSION = "0.1.0"
 
 logger = logging.getLogger(PLUGIN_NAME)
@@ -185,29 +185,29 @@ def register(ctx: Any) -> None:
 
     # 3. Register inspection tools
     if hasattr(ctx, "register_tool"):
-        def neural_context_status_tool(args: dict, **kw: Any) -> str:
+        def focus_status_tool(args: dict, **kw: Any) -> str:
             cfg, sidecar, _, _, receipt_emitter = _get_services(ctx)
             stats = receipt_emitter.get_summary_stats()
             return (
-                f"Neural Context Engine Active | Indexed Skills: {sidecar.n_docs} | "
+                f"Focus Context Engine Active | Indexed Skills: {sidecar.n_docs} | "
                 f"Backend: {cfg.router_backend} | Total Saved Tokens: {stats.get('total_tokens_saved', 0)}"
             )
 
         status_schema = {
-            "name": "neural_context_status",
-            "description": "Inspect the operational status of the Neural Context engine, sidecar index, and token savings.",
+            "name": "focus_status",
+            "description": "Inspect the operational status of the Focus context engine, sidecar index, and token savings.",
             "parameters": {"type": "object", "properties": {}}
         }
 
         ctx.register_tool(
-            name="neural_context_status",
-            toolset="neural-context",
-            handler=neural_context_status_tool,
-            description="Inspect the operational status of the Neural Context engine, sidecar index, and token savings.",
+            name="focus_status",
+            toolset="focus",
+            handler=focus_status_tool,
+            description="Inspect the operational status of the Focus context engine, sidecar index, and token savings.",
             schema=status_schema,
         )
 
-        def neural_context_route_tool(args: dict, **kw: Any) -> str:
+        def focus_route_tool(args: dict, **kw: Any) -> str:
             query = args.get("query", "")
             if not query:
                 return "Error: query is required."
@@ -218,7 +218,7 @@ def register(ctx: Any) -> None:
             return f"Route Result -> Winner: {selected} | Latency: {result.triage_latency_ms:.1f}ms | Status: {result.status}"
 
         route_schema = {
-            "name": "neural_context_route",
+            "name": "focus_route",
             "description": "Test or manually inspect cognitive triage and skill routing for a given user query.",
             "parameters": {
                 "type": "object",
@@ -230,9 +230,9 @@ def register(ctx: Any) -> None:
         }
 
         ctx.register_tool(
-            name="neural_context_route",
-            toolset="neural-context",
-            handler=neural_context_route_tool,
+            name="focus_route",
+            toolset="focus",
+            handler=focus_route_tool,
             description="Test or manually inspect cognitive triage and skill routing for a given user query.",
             schema=route_schema,
         )
@@ -247,11 +247,11 @@ def register(ctx: Any) -> None:
             return handle_cli(args, cfg, sidecar, receipt_emitter)
 
         ctx.register_cli_command(
-            name="neural-context",
-            help="Neural Context CLI: manage sidecar index, verify receipts, and run diagnostics.",
+            name="focus",
+            help="Focus CLI: manage sidecar index, configure settings, verify receipts, and run diagnostics.",
             setup_fn=cli_setup_fn,
             handler_fn=cli_handler_fn,
-            description="Manage cognitive triage, inspect receipts, and optimize skill index."
+            description="Focus: manage cognitive triage, configure budgets, inspect receipts, and optimize skill index."
         )
 
-    logger.info("neural-context-plugin v%s registered successfully.", PLUGIN_VERSION)
+    logger.info("focus v%s registered successfully.", PLUGIN_VERSION)
