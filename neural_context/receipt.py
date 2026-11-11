@@ -28,16 +28,22 @@ class ReceiptEmitter:
         platform: str = "cli",
         model: str = ""
     ) -> ReceiptRecord:
+        route_val = getattr(analysis, "route", "SKILL_ONLY")
+        if hasattr(route_val, "value"):
+            route_val = route_val.value
+
         record = ReceiptRecord(
             turn_id=turn_id,
             session_id=session_id,
             platform=platform,
             model=model,
+            route=str(route_val),
             is_task=analysis.is_actionable_task,
             domain="software" if analysis.domain.is_software_task else "general",
             entities_detected=analysis.extracted_entities,
             memory_injected_tokens=sum(m.token_estimate for m in route_result.selected_memories),
             selected_skill=route_result.selected_skill.name if route_result.selected_skill else None,
+            suggested_missing_skill=route_result.suggested_missing_skill,
             skill_is_project_local=route_result.selected_skill.is_project_local if route_result.selected_skill else False,
             skill_injected_tokens=len((route_result.injected_skill_content or "").split()),
             router_backend=route_result.router_backend,

@@ -1,8 +1,46 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class CognitiveRoute(str, Enum):
+    """
+    Explicit 4-quadrant cognitive routing policy:
+    - DIRECT_REPLY: Casual chat, greetings, simple conceptual Q&A (0 tokens injected).
+    - SKILL_ONLY: Procedural tasks requiring tools or execution skills, without historical memory dependency.
+    - MEMORY_ONLY: Historical recall, agreements, facts or past session context, without procedural tools.
+    - ENRICHED_TASK: Complex domain tasks tied to history/clients (two-phase: memory facts -> skill routing).
+    """
+    DIRECT_REPLY = "DIRECT_REPLY"
+    SKILL_ONLY = "SKILL_ONLY"
+    MEMORY_ONLY = "MEMORY_ONLY"
+    ENRICHED_TASK = "ENRICHED_TASK"
+
+
+class MemoryProbe(BaseModel):
+    """
+    Targeted probe for selective factual memory retrieval preserved in the user's native language.
+    Language-agnostic: does NOT force artificial translations.
+    """
+    entity: Optional[str] = Field(
+        default=None,
+        description="Named entity, brand, client or project if mentioned."
+    )
+    topic: Optional[str] = Field(
+        default=None,
+        description="Core subject, agreement or topic in the native interaction language."
+    )
+    time_anchor: Optional[str] = Field(
+        default=None,
+        description="Temporal reference in the native language (e.g. yesterday, last sprint, previous turn)."
+    )
+    query_text: str = Field(
+        default="",
+        description="Search phrase preserved in the interaction language for lexical/semantic memory matching."
+    )
 
 
 class DomainClassification(BaseModel):
@@ -21,8 +59,24 @@ class DomainClassification(BaseModel):
 
 
 class TriageAnalysis(BaseModel):
+    route: CognitiveRoute = Field(
+        default=CognitiveRoute.SKILL_ONLY,
+        description="Explicit 4-quadrant cognitive route decided by the Arbiter."
+    )
+    memory_probe: Optional[MemoryProbe] = Field(
+        default=None,
+        description="Structured probe for selective memory search in user's native language."
+    )
+    semantic_concepts: List[str] = Field(
+        default_factory=list,
+        description="Broad, uncoupled capability and domain concepts (e.g. ['marketing', 'leads', 'scripts', 'docker'])."
+    )
+    suggested_missing_skill: Optional[str] = Field(
+        default=None,
+        description="Recommended skill capability to install when no catalog skill matches the task."
+    )
     is_actionable_task: bool = Field(
-        ...,
+        default=True,
         description="False for trivial prompts, greetings, or acknowledgements; True for actionable user tasks."
     )
     needs_skills: bool = Field(
@@ -31,8 +85,46 @@ class TriageAnalysis(BaseModel):
     )
     needs_memory: bool = Field(
         default=False,
-        description="True if factual memory should be retrieved for detected entities."
+        description="True if factual memory should be retrieved."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_route_and_flags(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "route" not in data or data.get("route") is None:
+                is_act = data.get("is_actionable_task", True)
+                n_skills = data.get("needs_skills", is_act)
+                n_mem = data.get("needs_memory", False)
+                if not is_act or (not n_skills and not n_mem):
+                    data["route"] = CognitiveRoute.DIRECT_REPLY
+                elif n_skills and n_mem:
+                    data["route"] = CognitiveRoute.ENRICHED_TASK
+                elif n_mem:
+                    data["route"] = CognitiveRoute.MEMORY_ONLY
+                else:
+                    data["route"] = CognitiveRoute.SKILL_ONLY
+            else:
+                r = data["route"]
+                if isinstance(r, str) and r in CognitiveRoute.__members__:
+                    r = CognitiveRoute(r)
+                if r == CognitiveRoute.DIRECT_REPLY:
+                    data["is_actionable_task"] = False
+                    data["needs_skills"] = False
+                    data["needs_memory"] = False
+                elif r == CognitiveRoute.SKILL_ONLY:
+                    data["is_actionable_task"] = True
+                    data["needs_skills"] = True
+                    data["needs_memory"] = False
+                elif r == CognitiveRoute.MEMORY_ONLY:
+                    data["is_actionable_task"] = False
+                    data["needs_skills"] = False
+                    data["needs_memory"] = True
+                elif r == CognitiveRoute.ENRICHED_TASK:
+                    data["is_actionable_task"] = True
+                    data["needs_skills"] = True
+                    data["needs_memory"] = True
+        return data
     intent_summary_en: str = Field(
         default="",
         max_length=280,
@@ -44,11 +136,11 @@ class TriageAnalysis(BaseModel):
     )
     required_capabilities: List[str] = Field(
         default_factory=list,
-        description="3 to 6 technical capability nouns in English (e.g., ['campaign-planning', 'copywriting'])."
+        description="3 to 6 technical capability nouns in English."
     )
     extracted_entities: List[str] = Field(
         default_factory=list,
-        description="Named entities for selective memory retrieval (e.g. client names, campaigns, system IDs)."
+        description="Named entities for selective memory retrieval."
     )
     domain: DomainClassification = Field(
         default_factory=lambda: DomainClassification(is_software_task=False)
@@ -87,6 +179,7 @@ class RouteResult(BaseModel):
     injected_skill_content: Optional[str] = None
     selected_memories: List[MemoryItem] = Field(default_factory=list)
     combined_context_block: Optional[str] = None
+    suggested_missing_skill: Optional[str] = None
     triage_analysis: Optional[TriageAnalysis] = None
     tokens_saved_estimate: int = 0
     triage_latency_ms: float = 0.0
@@ -101,11 +194,13 @@ class ReceiptRecord(BaseModel):
     session_id: str = ""
     platform: str = "cli"
     model: str = ""
+    route: str = "SKILL_ONLY"
     is_task: bool = True
     domain: str = "general"
     entities_detected: List[str] = Field(default_factory=list)
     memory_injected_tokens: int = 0
     selected_skill: Optional[str] = None
+    suggested_missing_skill: Optional[str] = None
     skill_is_project_local: bool = False
     skill_injected_tokens: int = 0
     router_backend: str = "host_llm"

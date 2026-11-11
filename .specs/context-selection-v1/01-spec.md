@@ -27,7 +27,7 @@ The problem hypothesis:
 
 1. **Entity-driven domain task:** A user says *"Revisa lo de AcmeCorp"*. The selector extracts entity `"AcmeCorp"`, queries memory for AcmeCorp's stack (Meta CAPI + FastAPI), enriches the skill search, and injects `meta-pixel-capi` guidance plus AcmeCorp's memory facts in one step.
 2. **Multilingual task:** A user asks in Spanish for help fixing a webhook while the relevant procedure is described in English. The selector derives canonical English search intent and retrieves the webhook procedure without translating away the user's prompt.
-3. **Conversational fast exit:** A user greets or acknowledges (*"Hola"*, *"Ok gracias"*). The selector detects non-actionable intent and returns `None` immediately with zero token injection and maximum latency reduction (~95% faster TTFT).
+3. **Conversational fast exit:** A user greets or acknowledges (*"Hola"*, *"Ok gracias"*). The selector detects non-actionable intent and returns `None` immediately with zero token injection and immediate response without external retrieval overhead.
 4. **Governance precedence:** In a repository with local `AGENTS.md` and `.skills/`, local project skills take absolute priority over global fleet skills.
 5. **Fail-closed safety:** If model inference times out or an unexpected error occurs, the plugin returns `None`. Hermes proceeds normally without any block.
 
@@ -35,15 +35,15 @@ The problem hypothesis:
 
 - **Cognitive Arbiter:** The pre-inference evaluation engine that classifies incoming user messages into 4 distinct execution quadrants and synthesizes dimensional search probes.
 - **The 4-Quadrant Intent Model:**
-  - `Q1: DIRECT_REPLY` — Casual greetings, conceptual Q&A, or acknowledgements. Bypasses both memory and skills (zero token overhead, ~95% response latency reduction).
+  - `Q1: DIRECT_REPLY` — Casual greetings, conceptual Q&A, or acknowledgements. Bypasses both memory and skills (zero token overhead, fast-exit).
   - `Q2: SKILL_ONLY` — Direct technical action requests with no historical dependencies (bypasses memory, routes directly to skills).
   - `Q3: MEMORY_ONLY` — Recalls past decisions, credentials, agreements, or client facts (bypasses skills, probes memory surgically).
   - `Q4: ENRICHED_TASK` — Complex tasks linked to historical context ("Revisa lo de AcmeCorp"). Executes Two-Phase Enriched Routing: memory probe first for domain anchors, then memory-enriched skill routing.
 - **Dimensional Query Synthesis:** The Cognitive Arbiter translates ambiguous human phrasing into structured search queries:
-  - `Memory Probe`: Structured tuple `(entity/subject, platform/scope, temporal_anchor)`.
-  - `Skill Dispatch Intent`: Canonical English action summary, capability nouns (`["conversions-api", "event-deduplication"]`), and search query.
+  - `Memory Probe`: Structured tuple `(entity/subject, platform/scope, temporal_anchor)` preserved in the native interaction language.
+  - `Skill Dispatch Intent`: Canonical English action summary, broad capability nouns (`["marketing", "leads", "copywriting"]`), and search query.
 - **Context Broker:** The execution coordinator that manages surgical memory retrieval, runs graph-theoretic skill selection, and assembles the ephemeral context block.
-- **Information-Weighted Graph Router (`GraphRouter`):** A zero-cost, local, sub-millisecond semantic router using bipartite concept-skill spreading activation (Personalized PageRank) penalized by Information Content (TF-IDF), eliminating dependencies on external paid routing services.
+- **Information-Weighted Graph Router (`GraphRouter`):** A zero-cost, local, sub-millisecond semantic router using bipartite concept-skill spreading activation penalized by Information Content (TF-IDF), eliminating dependencies on external paid routing services.
 - **Adaptive Token Optimization:** Dynamic context bounding that minimizes tokens per response without artificially choking complex projects whose technical procedures exceed rigid thresholds.
 - **Ephemeral Context:** Injected context returned via `{"context": "..."}` appended strictly to the user message turn, leaving the system prompt byte-stable for prompt caching.
 - **Verifiable Receipt:** Deterministic JSON record logged per turn to `receipts.jsonl` proving latency, tokens saved, platform, active model, and execution status.
@@ -107,7 +107,7 @@ The problem hypothesis:
 
 ### FR-05 — Conversational Fast Exit
 - **Requirement:** For Q1 turns (greetings, acknowledgements, or non-actionable queries), exit immediately without touching memory or skill indexes.
-- **Acceptance:** Queries like *"Hola"* return `None` immediately with status `skipped_no_context_needed`, zero injected tokens, and ~95% response latency reduction.
+- **Acceptance:** Queries like *"Hola"* return `None` immediately with status `skipped_no_context_needed` and zero injected tokens.
 
 ### FR-06 — Repository Governance Sovereignty
 - **Requirement:** Local project `AGENTS.md` and `.skills/` take absolute precedence over global fleet skills.

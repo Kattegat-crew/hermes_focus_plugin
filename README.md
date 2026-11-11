@@ -59,8 +59,8 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
         │  - Extracts factual hints (e.g. AcmeCorp stack)         │
         │                                                         │
         │ Phase 2: Information-Weighted Graph Routing             │
-        │  - Spreading Activation / Personalized PageRank         │
-        │  - Multi-hop traversal: Entity -> Domain -> Winning Skill│
+        │  - Bipartite Concept Spreading Activation               │
+        │  - Multi-hop traversal: Concept -> Domain -> Winning Skill│
         │  - 100% Free, offline, sub-ms; Host LLM fallback on tie │
         │  - Local workspace AGENTS.md/.skills/ sovereignty       │
         └────────────────────────────┬────────────────────────────┘
@@ -92,7 +92,9 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
 ## Key Differentiators
 
 - **Cognitive Arbiter (4-Quadrant Triage)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`, synthesizing dimensional search probes rather than doing naive full-dump injections.
-- **Zero-Cost Information-Weighted Graph Routing (`GraphRouter`)**: Uses bipartite spreading activation (Personalized PageRank) penalized by Information Content to resolve multi-hop context (e.g. `AcmeCorp` $\to$ domain stack $\to$ winning skill) in $<1\text{ ms}$ with zero external API fees.
+- **Zero-Cost Information-Weighted Graph Routing (`GraphRouter`)**: Uses bipartite concept spreading activation weighted by Information Content to resolve multi-hop context (e.g. `AcmeCorp` $\to$ domain stack $\to$ winning skill) in $<1\text{ ms}$ with zero external API fees.
+- **Multilingual Native-Language Memory Probing**: Preserves the user's native language in memory queries (supporting Spanish, French, German, Chinese, Japanese, etc.) without artificial translation hops that break lexical precision.
+- **Skill Gap Detection & Suggestions**: When a task genuinely requires a capability that is missing from the catalog, the plugin avoids false positive injections and instead produces an authoritative skill recommendation notice.
 - **Multichannel & Model-Agnostic**: Intercepts turns seamlessly across CLI, Discord, Telegram, WhatsApp, and Desktop, running on whatever active model the user configured in Hermes (`ctx.llm`).
 - **Two-Phase Context-Enriched Routing**: Memory facts and skill procedures are not isolated silos. Extracted named entities query memory first to establish domain ground truth, which enriches the skill search to pinpoint the exact winning procedural skill.
 - **Preserves KV-Cache Stability**: Unlike mechanisms that alter the System Prompt, returning ephemeral context from `pre_llm_call` appends to the user turn, keeping the system prompt byte-stable for maximum prompt-cache hits and lowest TTFT.

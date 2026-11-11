@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Tuple
 
 from .config import PluginConfig
 from .memory import SelectiveMemoryRetriever, estimate_tokens
-from .models import RouteResult, SkillCandidate, TriageAnalysis
+from .models import CognitiveRoute, RouteResult, SkillCandidate, TriageAnalysis
 from .sidecar import SidecarIndex
 
 
@@ -92,18 +92,23 @@ class GraphRouter(SkillRouterBackend):
                     concept_skills[t] = []
                 concept_skills[t].append(c.name)
 
-        # Build seed activation vector from query, capabilities, and memory domain context
+        # Build seed activation vector from broad semantic concepts and domain context
         seeds: Dict[str, float] = {}
-        for cap in analysis.required_capabilities:
-            for token in re.findall(r"[a-zA-Z0-9_-]{3,}", cap.lower()):
-                seeds[token] = seeds.get(token, 0.0) + 2.0
+        concepts = analysis.semantic_concepts or analysis.required_capabilities or []
+        for concept in concepts:
+            c_clean = concept.strip().lower()
+            if not c_clean:
+                continue
+            seeds[c_clean] = seeds.get(c_clean, 0.0) + 3.0
+            for token in re.findall(r"[\w-]{3,}", c_clean):
+                seeds[token] = seeds.get(token, 0.0) + 1.5
 
         if analysis.intent_summary_en:
-            for token in re.findall(r"[a-zA-Z0-9_-]{3,}", analysis.intent_summary_en.lower()):
+            for token in re.findall(r"[\w-]{3,}", analysis.intent_summary_en.lower()):
                 seeds[token] = seeds.get(token, 0.0) + 1.0
 
         if domain_context:
-            for token in re.findall(r"[a-zA-Z0-9_-]{3,}", domain_context.lower()):
+            for token in re.findall(r"[\w-]{3,}", domain_context.lower()):
                 seeds[token] = seeds.get(token, 0.0) + 3.0  # High domain ground-truth energy
 
         if not seeds:
@@ -262,43 +267,57 @@ class ContextCoordinator:
     def execute(self, analysis: TriageAnalysis, user_message: str, cwd: Optional[str] = None) -> RouteResult:
         start_time = time.perf_counter()
 
-        # Fast exit if prompt is non-actionable or requires neither skills nor memory
-        if not analysis.is_actionable_task or (not analysis.needs_skills and not analysis.needs_memory):
+        # ---------------------------------------------------------
+        # Route 1: DIRECT_REPLY (Fast exit, zero injection)
+        # ---------------------------------------------------------
+        if analysis.route == CognitiveRoute.DIRECT_REPLY or (not analysis.is_actionable_task and not analysis.needs_memory and not analysis.needs_skills):
             return RouteResult(
                 triage_analysis=analysis,
                 triage_latency_ms=(time.perf_counter() - start_time) * 1000,
                 tokens_saved_estimate=0,
                 status="skipped_no_context_needed",
-                message=analysis.reasoning or "No skills or memory required for this turn."
+                message=analysis.reasoning or "Direct response: no external context required for this turn."
             )
 
         # ---------------------------------------------------------
-        # Phase 1: Selective Memory Query (Ground Domain Context)
+        # Route 3 & 4: Selective Memory Retrieval (Native Language Probe)
         # ---------------------------------------------------------
         memories = []
         memory_hints = ""
-        if self.config.selective_memory_enabled and (analysis.needs_memory or analysis.extracted_entities):
-            if analysis.extracted_entities:
-                memories = self.memory_retriever.retrieve(analysis.extracted_entities, cwd=cwd)
-                if memories:
-                    # Ground domain context with retrieved facts
-                    memory_hints = " ".join([f"{m.entity}: {m.fact}" for m in memories])
+        if self.config.selective_memory_enabled and (
+            analysis.route in (CognitiveRoute.MEMORY_ONLY, CognitiveRoute.ENRICHED_TASK)
+            or analysis.needs_memory
+        ):
+            memories = self.memory_retriever.retrieve(
+                entities=analysis.extracted_entities,
+                probe=analysis.memory_probe,
+                cwd=cwd
+            )
+            if memories:
+                memory_hints = " ".join([f"{m.entity}: {m.fact}" if m.entity else m.fact for m in memories])
 
+        # ---------------------------------------------------------
+        # Route 2 & 4: Skill Routing (Uncoupled Semantic Concepts + BM25)
+        # ---------------------------------------------------------
         selected_skill: Optional[SkillCandidate] = None
         skill_content: Optional[str] = None
+        suggested_missing_skill: Optional[str] = None
 
-        # ---------------------------------------------------------
-        # Phase 2: Context-Enriched Skill Search & Single-Skill Routing
-        # ---------------------------------------------------------
-        if analysis.needs_skills:
+        if analysis.route in (CognitiveRoute.SKILL_ONLY, CognitiveRoute.ENRICHED_TASK) or (
+            analysis.route not in (CognitiveRoute.DIRECT_REPLY, CognitiveRoute.MEMORY_ONLY) and analysis.needs_skills
+        ):
             query_parts = []
+            if analysis.semantic_concepts:
+                query_parts.append(" ".join(analysis.semantic_concepts))
+            elif analysis.required_capabilities:
+                query_parts.append(" ".join(analysis.required_capabilities))
+
             if analysis.search_query:
                 query_parts.append(analysis.search_query)
-            if analysis.intent_summary_en and analysis.intent_summary_en not in analysis.search_query:
+            elif analysis.intent_summary_en:
                 query_parts.append(analysis.intent_summary_en)
-            if analysis.required_capabilities:
-                query_parts.append(" ".join(analysis.required_capabilities))
-            # Enrich skill query with domain facts discovered in Phase 1
+
+            # Route 4: Ground skill search with domain facts discovered in Phase 1
             if memory_hints:
                 query_parts.append(memory_hints)
 
@@ -312,11 +331,21 @@ class ContextCoordinator:
                     skill_content = self._format_skill_for_injection(selected_skill.name, raw_skill)
                 except Exception:
                     skill_content = None
+            else:
+                # Skill gap suggestion
+                suggested_missing_skill = analysis.suggested_missing_skill or (
+                    "-".join(analysis.semantic_concepts[:2]) if analysis.semantic_concepts else None
+                )
 
         # ---------------------------------------------------------
         # Phase 3: Assemble Ephemeral Context Block
         # ---------------------------------------------------------
-        context_block = self._assemble_context_block(selected_skill, skill_content, memories)
+        context_block = self._assemble_context_block(
+            selected_skill,
+            skill_content,
+            memories,
+            suggested_skill=suggested_missing_skill
+        )
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         injected_tokens = estimate_tokens(context_block) if context_block else 0
@@ -327,6 +356,7 @@ class ContextCoordinator:
             injected_skill_content=skill_content,
             selected_memories=memories,
             combined_context_block=context_block,
+            suggested_missing_skill=suggested_missing_skill,
             triage_analysis=analysis,
             tokens_saved_estimate=tokens_saved,
             triage_latency_ms=elapsed_ms,
@@ -348,10 +378,19 @@ class ContextCoordinator:
         self,
         skill: Optional[SkillCandidate],
         skill_content: Optional[str],
-        memories: list
+        memories: list,
+        suggested_skill: Optional[str] = None
     ) -> Optional[str]:
-        if not skill_content and not memories:
+        if not skill_content and not memories and not suggested_skill:
             return None
+
+        # Notice fallback when task requires a skill but none was found
+        if not skill and not memories and suggested_skill:
+            return (
+                "<neural_context>\n"
+                f"[Notice: No procedural skill matched this task. Recommended capability to install: {suggested_skill}]\n"
+                "</neural_context>"
+            )
 
         max_tokens = self.config.max_context_tokens
         header = "<neural_context>"
@@ -366,7 +405,7 @@ class ContextCoordinator:
             mem_hdr = "## Active Memory Facts (Target Entities)"
             mem_tokens += estimate_tokens(mem_hdr)
             for m in memories:
-                m_line = f"- [{m.entity}] {m.fact}"
+                m_line = f"- [{m.entity}] {m.fact}" if m.entity else f"- {m.fact}"
                 m_tok = estimate_tokens(m_line)
                 if mem_tokens + m_tok > self.config.memory_token_budget:
                     break
@@ -393,6 +432,8 @@ class ContextCoordinator:
         if mem_lines:
             sections.append("\n## Active Memory Facts (Target Entities)")
             sections.extend(mem_lines)
+        if suggested_skill and not skill:
+            sections.append(f"\n[Notice: Recommended skill capability to install: {suggested_skill}]")
         sections.append(f"\n{instruction}")
         sections.append(footer)
 

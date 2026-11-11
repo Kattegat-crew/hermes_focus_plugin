@@ -6,36 +6,52 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from .models import DomainClassification, TriageAnalysis
+from .models import CognitiveRoute, DomainClassification, MemoryProbe, TriageAnalysis
 
 
-TRIAGE_SYSTEM_PROMPT = """You are the Cognitive Semantic Interpreter for Hermes Agent's Neural Context Engine.
-Your job is to read the raw user message and perform a deep cognitive analysis of the user's intent, tolerating typos, informal phrasing, ambiguous statements, or omissions.
+TRIAGE_SYSTEM_PROMPT = """You are the Cognitive Semantic Arbiter for Hermes Agent's Neural Context Engine.
+You read user messages in ANY human language (multilingual: English, Spanish, French, German, Chinese, Japanese, etc.) and perform a deep cognitive analysis of the intent.
 
-You must determine:
-1. Is this an actionable task requiring execution or assistance, or purely conversational/casual/acknowledgement?
-2. Does this task genuinely require procedural specialized skills (guidance/tools), or is it a general conceptual reply that needs no external skills?
-3. Does this task require recalling historical factual memory (agreements, past decisions, client facts)?
-4. What is the canonical 1-sentence technical intent in English?
-5. Formulate an optimized search phrase in English using the dual pattern:
-   "When the user needs to <action> <target> — <imperative verb> <target>."
-6. Identify 3 to 6 capability nouns in English (e.g. ["campaign-planning", "copywriting"]).
-7. Extract named entities (clients, projects, systems, brands).
-8. Is this a software engineering or devops task?
+You must decide:
+1. Route Classification (Select exactly ONE of 4 routes):
+   - "DIRECT_REPLY": Casual chat, greetings, trivial affirmations, simple conceptual Q&A, or general answers requiring NO external procedural skills and NO historical memory recall.
+   - "SKILL_ONLY": The user requests a procedural action or tool usage (e.g. web search, file processing, writing a script) that does NOT depend on historical memory or agreements.
+   - "MEMORY_ONLY": The user asks about historical agreements, past decisions, client facts, or previous session context, WITHOUT requesting a complex procedural tool execution.
+   - "ENRICHED_TASK": Complex domain task tied to past history/client facts (requires recalling memory facts first, then routing procedural skills).
 
-OUTPUT FORMAT:
-Respond with pure JSON conforming exactly to this structure:
+2. Memory Probe (Preserve Native Interaction Language):
+   - If memory is needed (MEMORY_ONLY or ENRICHED_TASK), formulate the search query in the USER'S NATIVE LANGUAGE without artificial translation.
+   - entity: Specific client name, brand, or project if mentioned (or null).
+   - topic: Subject, agreement, or topic in the native language (e.g. "acuerdo entrega api").
+   - time_anchor: Temporal phrase if mentioned (e.g. "ayer", "yesterday", "last week", or null).
+   - query_text: Clean search terms in the user's native language.
+
+3. Semantic Concepts for Skill Retrieval (Broad & Uncoupled):
+   - semantic_concepts: 3 to 6 broad capability or domain terms in English and technical terms (e.g. ["marketing", "leads", "copywriting", "docker", "api"]). Do NOT guess exact skill filenames; provide standard domain terms.
+
+4. Skill Gap Detection:
+   - suggested_missing_skill: If a specialized task requires a skill that standard catalogs might lack, suggest a canonical capability slug (or null).
+
+5. Software Domain:
+   - is_software_task: true/false.
+   - detected_stack: detected technologies (e.g. ["python", "docker"]).
+
+OUTPUT FORMAT (Pure JSON):
 {
-  "is_actionable_task": true/false,
-  "needs_skills": true/false,
-  "needs_memory": true/false,
-  "intent_summary_en": "Clear 1-sentence imperative description in English",
-  "search_query": "When the user needs to <verb> <object> — <imperative> <object>",
-  "required_capabilities": ["cap1", "cap2", "cap3"],
-  "extracted_entities": ["Entity1"],
-  "is_software_task": true/false,
-  "detected_stack": ["python", "docker"],
-  "reasoning": "1 sentence explanation of why skills/memory are or are not needed"
+  "route": "DIRECT_REPLY" | "SKILL_ONLY" | "MEMORY_ONLY" | "ENRICHED_TASK",
+  "memory_probe": {
+    "entity": "Name or null",
+    "topic": "Topic in user language or null",
+    "time_anchor": "Time anchor or null",
+    "query_text": "Search terms in user language"
+  },
+  "semantic_concepts": ["concept1", "concept2"],
+  "suggested_missing_skill": null,
+  "intent_summary_en": "1-sentence imperative description in English",
+  "search_query": "When the user needs to <action> — <imperative> <action>",
+  "is_software_task": false,
+  "detected_stack": [],
+  "reasoning": "1 sentence explaining the selected route"
 }
 """
 
@@ -147,13 +163,57 @@ class CognitiveTriage:
             if match:
                 try:
                     data = json.loads(match.group(0))
-                    is_actionable = bool(data.get("is_actionable_task", True))
-                    needs_skills = bool(data.get("needs_skills", is_actionable))
-                    needs_memory = bool(data.get("needs_memory", False))
+
+                    # Parse route or derive from legacy boolean signals
+                    raw_route = str(data.get("route", "")).strip().upper()
+                    if raw_route in CognitiveRoute.__members__:
+                        route = CognitiveRoute(raw_route)
+                    else:
+                        legacy_act = bool(data.get("is_actionable_task", True))
+                        legacy_skills = bool(data.get("needs_skills", legacy_act))
+                        legacy_mem = bool(data.get("needs_memory", False))
+                        if not legacy_act or (not legacy_skills and not legacy_mem):
+                            route = CognitiveRoute.DIRECT_REPLY
+                        elif legacy_skills and legacy_mem:
+                            route = CognitiveRoute.ENRICHED_TASK
+                        elif legacy_mem:
+                            route = CognitiveRoute.MEMORY_ONLY
+                        else:
+                            route = CognitiveRoute.SKILL_ONLY
+
+                    is_actionable = (route != CognitiveRoute.DIRECT_REPLY)
+                    needs_skills = (route in (CognitiveRoute.SKILL_ONLY, CognitiveRoute.ENRICHED_TASK))
+                    needs_memory = (route in (CognitiveRoute.MEMORY_ONLY, CognitiveRoute.ENRICHED_TASK))
+
+                    # Extract broad uncoupled semantic concepts
+                    raw_concepts = data.get("semantic_concepts") or data.get("required_capabilities") or []
+                    semantic_concepts = [str(c).strip().lower() for c in raw_concepts if str(c).strip()]
+
+                    # Extract entities
+                    entities = [str(e).strip() for e in data.get("extracted_entities", []) if str(e).strip()]
+
+                    # Parse memory probe
+                    memory_probe: Optional[MemoryProbe] = None
+                    probe_data = data.get("memory_probe")
+                    if isinstance(probe_data, dict):
+                        ent = probe_data.get("entity") or (entities[0] if entities else None)
+                        memory_probe = MemoryProbe(
+                            entity=str(ent).strip() if ent else None,
+                            topic=str(probe_data.get("topic") or "").strip() or None,
+                            time_anchor=str(probe_data.get("time_anchor") or "").strip() or None,
+                            query_text=str(probe_data.get("query_text") or original_text).strip()
+                        )
+                    elif needs_memory or entities:
+                        memory_probe = MemoryProbe(
+                            entity=entities[0] if entities else None,
+                            topic=original_text[:100],
+                            query_text=original_text
+                        )
+
                     intent_en = str(data.get("intent_summary_en", "")).strip()
                     search_query = str(data.get("search_query", "")).strip()
-                    capabilities = [str(c).strip().lower() for c in data.get("required_capabilities", [])]
-                    entities = [str(e).strip() for e in data.get("extracted_entities", [])]
+                    suggested_missing = data.get("suggested_missing_skill")
+                    suggested_missing_skill = str(suggested_missing).strip().lower() if suggested_missing else None
                     reasoning = str(data.get("reasoning", "")).strip()
 
                     is_sw = bool(data.get("is_software_task", domain_info.is_software_task))
@@ -167,15 +227,19 @@ class CognitiveTriage:
                         final_query = intent_en
 
                     return TriageAnalysis(
+                        route=route,
+                        memory_probe=memory_probe,
+                        semantic_concepts=semantic_concepts,
+                        suggested_missing_skill=suggested_missing_skill,
                         is_actionable_task=is_actionable,
                         needs_skills=needs_skills,
                         needs_memory=needs_memory,
                         intent_summary_en=intent_en or original_text[:200],
                         search_query=final_query,
-                        required_capabilities=capabilities,
+                        required_capabilities=semantic_concepts,
                         extracted_entities=entities,
                         domain=domain_info,
-                        reasoning=reasoning or "Parsed from cognitive model interpretation.",
+                        reasoning=reasoning or f"Classified as {route.value} by cognitive arbiter.",
                         confidence=0.95
                     )
                 except Exception:
@@ -193,14 +257,18 @@ class CognitiveTriage:
         """
         Grammatical intent induction used ONLY when the model endpoint is offline or unavailable.
         Analyzes communicative modality (imperative, interrogative, declarative) and predicate clauses
-        WITHOUT hardcoded keyword dictionaries.
+        WITHOUT hardcoded keyword dictionaries across languages.
         """
         stripped = text.strip()
         words = stripped.split()
 
         # Pure acknowledgements / extremely short non-clause expressions (< 3 tokens without predicate)
-        if len(words) <= 2 and not any(c in stripped for c in [":", "/", "\\", "{", "}"]):
+        if len(words) <= 2 and not any(c in stripped for c in [":", "/", "\\", "{", "}", "?"]):
             return TriageAnalysis(
+                route=CognitiveRoute.DIRECT_REPLY,
+                memory_probe=None,
+                semantic_concepts=[],
+                suggested_missing_skill=None,
                 is_actionable_task=False,
                 needs_skills=False,
                 needs_memory=False,
@@ -220,18 +288,58 @@ class CognitiveTriage:
             if w[0].isupper() and len(w) > 2 and w not in entities:
                 entities.append(w)
 
+        # Check for historical memory inquiry signals across languages
+        is_interrogative = stripped.endswith("?") or stripped.startswith(("¿", "?", "what", "how", "when", "quién", "qué", "cuándo", "cómo", "rappelle", "erinner"))
+        has_memory_signal = bool(entities) or any(t in stripped.lower() for t in [
+            "acord", "ayer", "yesterday", "last", "entrega", "historial", "decidi", "hablamos", "previous", "earlier", "rappel", "accord"
+        ])
+        has_exec_verb = any(verb in stripped.lower() for verb in [
+            "crea", "build", "run", "ejecuta", "programa", "code", "escribe", "write", "make", "genera", "generate"
+        ])
+
+        if is_interrogative and has_memory_signal and not has_exec_verb:
+            route = CognitiveRoute.MEMORY_ONLY
+            is_actionable = False
+            needs_skills = False
+            needs_memory = True
+        elif entities and has_memory_signal:
+            route = CognitiveRoute.ENRICHED_TASK
+            is_actionable = True
+            needs_skills = True
+            needs_memory = True
+        else:
+            route = CognitiveRoute.SKILL_ONLY
+            is_actionable = True
+            needs_skills = True
+            needs_memory = False
+
+        memory_probe = None
+        if needs_memory:
+            memory_probe = MemoryProbe(
+                entity=entities[0] if entities else None,
+                topic=stripped[:100],
+                query_text=stripped
+            )
+
+        # Extract broad concept words (alphanumeric words >= 4 chars)
+        concepts = [w.lower() for w in re.findall(r"[\w]{4,}", stripped) if w.lower() not in {"this", "that", "para", "with", "from", "sobre", "como"}]
+
         # Formulate dual query in English
         query_en = f"When the user needs to execute: {stripped} — execute {stripped}"
 
         return TriageAnalysis(
-            is_actionable_task=True,
-            needs_skills=True,
-            needs_memory=bool(entities),
+            route=route,
+            memory_probe=memory_probe,
+            semantic_concepts=concepts[:5],
+            suggested_missing_skill=None,
+            is_actionable_task=is_actionable,
+            needs_skills=needs_skills,
+            needs_memory=needs_memory,
             intent_summary_en=f"Execute task: {stripped[:200]}",
-            search_query=query_en,
-            required_capabilities=[],
+            search_query=query_en if needs_skills else "",
+            required_capabilities=concepts[:5],
             extracted_entities=entities[:5],
             domain=domain_info,
-            reasoning="Clause with active predicate detected; routed for capability evaluation.",
+            reasoning=f"Offline grammatical induction selected {route.value}.",
             confidence=0.75
         )

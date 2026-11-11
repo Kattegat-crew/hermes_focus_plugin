@@ -42,8 +42,8 @@ Instead of treating skills and memories as isolated silos, it executes a **Two-P
            │  - Extracts factual anchors (e.g. AcmeCorp stack)       │
            │                                                         │
            │ Phase 2: Information-Weighted Graph Routing             │
-           │  - Spreading Activation / Personalized PageRank         │
-           │  - Multi-hop traversal: Entity -> Domain -> Winning Skill│
+           │  - Bipartite Concept Spreading Activation               │
+           │  - Multi-hop traversal: Concept -> Domain -> Winning Skill│
            │  - Ambiguity Gate: Escalates to Host LLM on tie         │
            │  - Local workspace AGENTS.md/.skills/ sovereignty       │
            └────────────────────────────┬────────────────────────────┘
@@ -94,7 +94,7 @@ The design strictly complies with source-verified contracts in `/opt/hermes-agen
 ### 3.1 Cognitive Arbiter (`neural_context/triage.py`)
 - **Model-First Evaluation**: Every message is analyzed by calling `ctx.llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=300, temperature=0.0)`.
 - **4-Quadrant Decision Tree**:
-  - `Q1: DIRECT_REPLY`: Greetings, chit-chat, conceptual questions. Returns `needs_skills=False, needs_memory=False` for immediate fast-exit with ~95% response latency reduction and zero token injection.
+  - `Q1: DIRECT_REPLY`: Greetings, chit-chat, conceptual questions. Returns `route=DIRECT_REPLY` for immediate fast-exit with zero token injection.
   - `Q2: SKILL_ONLY`: Direct action/task without historical memory dependency. Bypasses memory search and routes skills directly.
   - `Q3: MEMORY_ONLY`: Recalls past agreements, client facts, or preferences. Probes memory and bypasses skill catalog.
   - `Q4: ENRICHED_TASK`: Complex domain tasks tied to history. Probes memory first, synthesizes enriched query, then routes skills.
@@ -120,7 +120,7 @@ The design strictly complies with source-verified contracts in `/opt/hermes-agen
   3. *Phase 3*: Injects winning skill procedure (frontmatter stripped) + active memory facts.
 - **Information-Weighted Graph Router (`GraphRouter`)**:
   - Constructs a bipartite concept-skill network.
-  - Applies spreading activation (Personalized PageRank) from memory domain concepts and task capability seeds.
+  - Applies spreading activation from memory domain concepts and broad task capability seeds.
   - Penalizes high-frequency hub tokens using Information Content / TF-IDF.
   - Ambiguity Gate: If top candidates have close scores ($\Delta < \tau$), falls back to Host LLM (`ctx.llm`).
   - Zero external API keys, 100% free and local, sub-millisecond execution.

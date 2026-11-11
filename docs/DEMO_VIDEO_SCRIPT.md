@@ -45,9 +45,9 @@
   === Neural Context Verifiable Receipts (Last 1 turns) ===
     Turns Audited       : 1
     Skills Routed       : 1 (meta-pixel-capi)
-    Token Reduction     : 95.7% saved vs static preloading
-    Conversational Exit : 100% turns fast-exited on chit-chat
-    Tokens Saved Total  : 11,480 tokens
+    Injected Tokens     : 380 tokens (Skill + Factual Context)
+    Conversational Exit : Active (Zero tokens injected on pure chit-chat)
+    Tokens Saved Total  : 11,620 tokens vs static preloading
   ```
 - **Visual**: Now show a casual greeting fast-exit:
   ```bash
@@ -55,8 +55,8 @@
   Hermes: ¡Hola! ¿En qué te puedo ayudar hoy?
   ```
 - **Voiceover / Audio**:
-  > *"Every turn produces a deterministic, verifiable receipt. Notice that turn: over 90% token reduction compared to static preloading.*
-  > *And when you say 'Hola'? The Cognitive Arbiter detects non-actionable intent and exits immediately with ZERO token injection and maximum latency reduction."*
+  > *"Every turn produces a deterministic, verifiable receipt. Notice that turn: selective ephemeral context without preloading the entire catalog.*
+  > *And when you say 'Hola'? The Cognitive Arbiter classifies it as DIRECT_REPLY and exits immediately with ZERO token injection."*
 
 ---
 
@@ -68,8 +68,8 @@
   ```
 - **Terminal Output**: Clean green checkmarks across all tools, hooks, and isolation probes.
 - **Voiceover / Audio**:
-  > *"100% compliant with Hermes Plugin architecture, 22/22 unit tests passing, and zero file mutations.*
-  > *Built by Jesús Díaz and NeuralCrew Labs. Install it today with `hermes plugins install Kattegat-crew/neural-context-plugin`."*
+  > *"100% compliant with Hermes Plugin architecture, 27/27 unit tests passing, and zero file mutations.*
+  > *Built by Jesús Díaz and Kattegat Crew. Install it today with `hermes plugins install Kattegat-crew/neural-context-plugin`."*
 
 ---
 
@@ -78,13 +78,12 @@
 Proud to submit Neural Context Plugin to the @NousResearch Hermes Agent Plugin Hackathon! 🚀🧠
 
 Solves the Mature Agent Dilemma:
-✅ Cognitive Arbiter: 4-Quadrant Intent Model (Fast-exit on conversational turns)
+✅ Cognitive Arbiter: 4-Quadrant Intent Model (DIRECT_REPLY, SKILL_ONLY, MEMORY_ONLY, ENRICHED_TASK)
 ✅ Two-Phase Context-Enriched Routing (Selective Memory ➔ Skill Selection)
-✅ Free, local Information-Weighted GraphRouter (Personalized PageRank)
-✅ Single-step skill injection (no secondary round-trip tool calls)
-✅ 100% Byte-stable System Prompt (Zero KV-cache mutation)
-✅ 70% to 95% token footprint reduction vs static catalog preloading
-✅ Verifiable Audit Receipts & CLI
+✅ Free, local Bipartite Concept GraphRouter with Spreading Activation
+✅ Multilingual native-language memory probes & skill gap detection
+✅ Single-step ephemeral injection into user turn (100% Byte-stable System Prompt / KV-cache friendly)
+✅ Verifiable Audit Receipts & CLI (`hermes neural-context verify`)
 
 GitHub: https://github.com/Kattegat-crew/neural-context-plugin
 
