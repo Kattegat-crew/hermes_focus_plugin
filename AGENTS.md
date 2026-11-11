@@ -1,6 +1,6 @@
 # AGENTS.md — Standards, SDD Lifecycle & Skills Contract (`hermes_focus_plugin`)
 
-This document governs all agentic development (Hermes fleet, Claude Code, Codex, Antigravity/Toallín, OpenCode) on the **`hermes_focus_plugin`** repository (`/opt/neural-context-plugin`).
+This document governs all agentic development (Hermes fleet, Claude Code, Codex, Antigravity/Toallín, OpenCode) on the **`hermes_focus_plugin`** repository (`/opt/hermes_focus_plugin`).
 
 ---
 
@@ -47,13 +47,13 @@ Antes de implementar o modificar cualquier subsistema, los agentes **DEBEN** lee
 
 | Capacidad Requerida | Skill Local | Propósito y Alcance |
 | :--- | :--- | :--- |
-| **API de Plugins & Hooks** | [`.skills/hermes-plugin-development/SKILL.md`](file:///opt/neural-context-plugin/.skills/hermes-plugin-development/SKILL.md) | Ciclo de vida de `register(ctx)`, contratos de `pre_llm_call`, registro seguro de tools (`schema`) y CLI. |
-| **Seguridad Fail-Closed** | [`.skills/design-fail-closed-gate/SKILL.md`](file:///opt/neural-context-plugin/.skills/design-fail-closed-gate/SKILL.md) | Garantía estructural de que un fallo de red o parseo jamás rompa el turno del agente. |
-| **Triage & Extracción LLM** | [`.skills/llm-structured-output/SKILL.md`](file:///opt/neural-context-plugin/.skills/llm-structured-output/SKILL.md) | Extracción cognitiva basada en modelo, tolerancia a errores humanos y salida Pydantic determinista. |
-| **Búsqueda Sidecar BM25** | [`.skills/bm25-sidecar-search/SKILL.md`](file:///opt/neural-context-plugin/.skills/bm25-sidecar-search/SKILL.md) | Base SQLite indexada por SHA-256 sin mutar archivos del usuario y ranking léxico en memoria sub-5ms. |
-| **Empaquetado Python** | [`.skills/python-packaging/SKILL.md`](file:///opt/neural-context-plugin/.skills/python-packaging/SKILL.md) | Estándares de `pyproject.toml`, UV, sin scripts ocultos ni dependencias innecesarias. |
-| **Criterios del Concurso** | [`.skills/hackathon-judge/SKILL.md`](file:///opt/neural-context-plugin/.skills/hackathon-judge/SKILL.md) | 33 requisitos y preflight de validación para el jurado de Nous Research. |
-| **Autoría de Skills** | [`.skills/skill-creator/SKILL.md`](file:///opt/neural-context-plugin/.skills/skill-creator/SKILL.md) & [`.skills/skill-auditor/SKILL.md`](file:///opt/neural-context-plugin/.skills/skill-auditor/SKILL.md) | Pautas para la skill empaquetada que acompaña al plugin. |
+| **API de Plugins & Hooks** | [`.skills/hermes-plugin-development/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/hermes-plugin-development/SKILL.md) | Ciclo de vida de `register(ctx)`, contratos de `pre_llm_call`, registro seguro de tools (`schema`) y CLI. |
+| **Seguridad Fail-Closed** | [`.skills/design-fail-closed-gate/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/design-fail-closed-gate/SKILL.md) | Garantía estructural de que un fallo de red o parseo jamás rompa el turno del agente. |
+| **Triage & Extracción LLM** | [`.skills/llm-structured-output/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/llm-structured-output/SKILL.md) | Extracción cognitiva basada en modelo, tolerancia a errores humanos y salida Pydantic determinista. |
+| **Búsqueda Sidecar BM25** | [`.skills/bm25-sidecar-search/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/bm25-sidecar-search/SKILL.md) | Base SQLite indexada por SHA-256 sin mutar archivos del usuario y ranking léxico en memoria sub-5ms. |
+| **Empaquetado Python** | [`.skills/python-packaging/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/python-packaging/SKILL.md) | Estándares de `pyproject.toml`, UV, sin scripts ocultos ni dependencias innecesarias. |
+| **Criterios del Concurso** | [`.skills/hackathon-judge/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/hackathon-judge/SKILL.md) | 33 requisitos y preflight de validación para el jurado de Nous Research. |
+| **Autoría de Skills** | [`.skills/skill-creator/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/skill-creator/SKILL.md) & [`.skills/skill-auditor/SKILL.md`](file:///opt/hermes_focus_plugin/.skills/skill-auditor/SKILL.md) | Pautas para la skill empaquetada que acompaña al plugin. |
 
 ---
 
@@ -63,6 +63,6 @@ Antes de implementar o modificar cualquier subsistema, los agentes **DEBEN** lee
 2. **Preservación de KV-Cache**: El System Prompt base debe permanecer 100% byte-estable a lo largo de la conversación. Cualquier contexto inyectado debe viajar en el mensaje de usuario efímero mediante `{"context": "..."}`.
 3. **Cero Mutación de Archivos de Usuario**: Los archivos `SKILL.md` y de memoria nunca se alteran ni reescriben. Todos los datos derivados viven en `sidecar_index.db` dentro del directorio de datos del plugin.
 4. **Validación Obligatoria Pre-Commit**:
-   - `pytest /opt/neural-context-plugin/tests -v` ➔ 100% pruebas pasando.
-   - `hermes plugins validate /opt/neural-context-plugin` ➔ Cero errores / Cero advertencias.
-   - `hermes plugins doctor /opt/neural-context-plugin` ➔ Diagnóstico en estado `OK`.
+   - `pytest /opt/hermes_focus_plugin/tests -v` ➔ 100% pruebas pasando.
+   - `hermes plugins validate /opt/hermes_focus_plugin` ➔ Cero errores / Cero advertencias.
+   - `hermes plugins doctor /opt/hermes_focus_plugin` ➔ Diagnóstico en estado `OK`.
