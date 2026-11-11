@@ -169,9 +169,31 @@ class SelectiveMemoryRetriever:
             except Exception:
                 continue
 
+            current_section_entity: Optional[str] = None
+            current_section_level: int = 0
+
             for line in content.splitlines():
                 trimmed = line.strip()
-                if not trimmed or len(trimmed) < 10 or trimmed.startswith("#"):
+                if not trimmed:
+                    continue
+
+                if trimmed.startswith("#"):
+                    hashes = len(trimmed) - len(trimmed.lstrip("#"))
+                    heading_text = trimmed.lstrip("#").strip()
+                    matched_heading_ent = None
+                    for ent_name, pat in entity_matchers:
+                        if pat.search(heading_text):
+                            matched_heading_ent = ent_name
+                            break
+                    if matched_heading_ent:
+                        current_section_entity = matched_heading_ent
+                        current_section_level = hashes
+                    elif current_section_entity and hashes <= current_section_level:
+                        current_section_entity = None
+                        current_section_level = 0
+                    continue
+
+                if len(trimmed) < 8:
                     continue
 
                 # Prompt injection defense
@@ -184,7 +206,10 @@ class SelectiveMemoryRetriever:
                         matched_entity = ent_name
                         break
 
-                if not matched_entity and topic_matchers:
+                if not matched_entity and current_section_entity:
+                    matched_entity = current_section_entity
+
+                if not matched_entity and not entity_matchers and topic_matchers:
                     matches = sum(1 for pat in topic_matchers if pat.search(trimmed))
                     min_required = min(2, len(topic_matchers))
                     if matches >= min_required:

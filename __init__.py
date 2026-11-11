@@ -162,7 +162,10 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
         analysis = triage.analyze(text, cwd=cwd)
         result = coordinator.execute(analysis, user_message=text, cwd=cwd)
 
-        # Store session/turn state isolated from concurrent sessions
+        # Store session/turn state isolated from concurrent sessions (bounded to 256 entries)
+        if len(_session_turns) >= 256:
+            oldest_key = next(iter(_session_turns))
+            _session_turns.pop(oldest_key, None)
         _session_turns[turn_key] = (analysis, result, platform, model_name)
 
         if result.combined_context_block:
@@ -255,8 +258,9 @@ def register(ctx: Any) -> None:
             if not query:
                 return "Error: query is required."
             _, _, triage, coordinator, _ = _get_services(ctx)
-            analysis = triage.analyze(query)
-            result = coordinator.execute(analysis, user_message=query)
+            cwd = getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
+            analysis = triage.analyze(query, cwd=cwd)
+            result = coordinator.execute(analysis, user_message=query, cwd=cwd)
             selected = result.selected_skill.name if result.selected_skill else "None"
             return f"Route Result -> Winner: {selected} | Latency: {result.triage_latency_ms:.1f}ms | Status: {result.status}"
 

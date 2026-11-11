@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional, Tuple
 
 from .config import PluginConfig, get_hermes_home
 from .receipt import ReceiptEmitter
@@ -61,7 +62,7 @@ def _coerce_and_validate(key: str, val: str) -> Tuple[Optional[Any], Optional[st
         except ValueError:
             return None, f"Invalid value for '{key}': expected integer, got '{val}'"
     elif expected_type is str:
-        if key == "router_backend" and val not in ("host_llm", "graph", "jev"):
+        if key == "router_backend" and val not in ("host_llm", "graph", "heuristic", "jev"):
             return None, f"Invalid backend '{val}': choose from 'host_llm', 'graph', 'jev'"
         return val, None
 

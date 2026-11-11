@@ -269,3 +269,104 @@ def test_enriched_task_routing_with_named_entity():
     assert result.memory_probe is not None
     assert result.memory_probe.entity == "AcmeCorp"
 
+
+def test_markdown_section_hierarchy_and_anti_contamination(tmp_path: Path):
+    """
+    Ensure Markdown memory probing captures bullets under `## Entity` sections
+    without requiring entity repetition on every bullet, and prevents cross-section
+    contamination when other sections share topic keywords.
+    """
+    mem_file = tmp_path / "MEMORY.md"
+    mem_file.write_text(
+        "# Memory\n\n"
+        "## AcmeCorp\n"
+        "- Client: Retail e-commerce platform\n"
+        "- Stack: Uses Meta Conversions API (CAPI) and FastAPI backend\n\n"
+        "## Golden Game\n"
+        "- Golden Game runs WordPress and uses TikTok Pixel without any CAPI integration.\n",
+        encoding="utf-8"
+    )
+
+    retriever = SelectiveMemoryRetriever(token_budget=0)
+    probe = MemoryProbe(
+        entity="AcmeCorp",
+        topic="pixel CAPI de Meta",
+        query_text="AcmeCorp pixel CAPI"
+    )
+    items = retriever.retrieve(entities=["AcmeCorp"], probe=probe, cwd=str(tmp_path))
+
+    facts_joined = " ".join(i.fact for i in items)
+    assert "Meta Conversions API (CAPI)" in facts_joined
+    assert "FastAPI" in facts_joined
+    assert "Golden Game" not in facts_joined
+    assert "TikTok" not in facts_joined
+
+
+def test_two_phase_shorthand_review_selects_domain_grounded_skill(tmp_path: Path):
+    """
+    Ensure 'Revisa lo de AcmeCorp' (where initial triage only sees generic 'review' concepts)
+    grounds Phase 2 routing in discovered Phase 1 memory facts and selects 'meta-pixel-capi'
+    over generic 'sdlc-review' / 'general-audit' distractors.
+    """
+    from neural_context.config import PluginConfig
+    from neural_context.models import TriageAnalysis
+    from neural_context.router import ContextCoordinator
+    from neural_context.sidecar import SidecarIndex
+
+    skills_dir = tmp_path / "skills"
+    for name, desc, body in [
+        ("sdlc-review", "Review SDLC project status and code", "General review checklist for software projects and audits."),
+        ("general-audit", "Audit project configuration and status", "Inspect and review client project configuration."),
+        ("meta-pixel-capi", "Implement and diagnose hybrid Meta Pixel and Conversions API (CAPI)", "Deduplicate and inspect Meta Pixel and Conversions API server-side events."),
+    ]:
+        sdir = skills_dir / name
+        sdir.mkdir(parents=True)
+        (sdir / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {desc}\n---\n# {name}\n{body}\n", encoding="utf-8")
+
+    cwd_dir = tmp_path / "workspace"
+    cwd_dir.mkdir(parents=True)
+    (cwd_dir / "MEMORY.md").write_text(
+        "# Memory\n\n## AcmeCorp\n- Client: Retail\n- Stack: AcmeCorp uses Meta Conversions API (CAPI) and FastAPI.\n",
+        encoding="utf-8"
+    )
+
+    db_file = tmp_path / "sidecar.db"
+    sidecar = SidecarIndex(db_path=str(db_file))
+    sidecar.sync_skills(list(skills_dir.glob("*/SKILL.md")))
+
+    config = PluginConfig(sidecar_db_path=str(db_file), router_backend="graph", selective_memory_enabled=True)
+    coordinator = ContextCoordinator(config=config, sidecar=sidecar)
+
+    analysis = TriageAnalysis(
+        route=CognitiveRoute.ENRICHED_TASK,
+        memory_probe=MemoryProbe(entity="AcmeCorp", topic="project review", query_text="AcmeCorp"),
+        semantic_concepts=["review", "inspection", "audit", "project"],
+        extracted_entities=["AcmeCorp"],
+        intent_summary_en="Review AcmeCorp project configuration and status",
+        search_query="When the user needs to review a client project — review project status",
+        domain=DomainClassification(is_software_task=True)
+    )
+
+    result = coordinator.execute(analysis, user_message="Revisa lo de AcmeCorp", cwd=str(cwd_dir))
+    assert result.selected_skill is not None
+    assert result.selected_skill.name == "meta-pixel-capi"
+
+
+def test_single_unrelated_candidate_is_rejected():
+    """Ensure a single candidate matching only generic stopwords is rejected rather than blindly injected."""
+    from neural_context.models import SkillCandidate, TriageAnalysis
+    from neural_context.router import GraphRouter
+
+    router = GraphRouter()
+    analysis = TriageAnalysis(
+        route=CognitiveRoute.SKILL_ONLY,
+        semantic_concepts=["quantum-teleportation", "wormhole-stabilizer"],
+        intent_summary_en="Calibrate quantum wormhole stabilizer",
+        search_query="When the user needs to calibrate wormhole — calibrate stabilizer"
+    )
+    candidates = [
+        (SkillCandidate(name="cooking-pasta", description="When the user needs to boil water", lead_paragraph="How to cook pasta", path="/tmp/1"), 0.28)
+    ]
+    assert router.route(analysis, candidates) is None
+
+

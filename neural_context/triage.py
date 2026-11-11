@@ -58,11 +58,12 @@ OUTPUT SPECIFICATION (Pure JSON only):
   "route": "DIRECT_REPLY" | "SKILL_ONLY" | "MEMORY_ONLY" | "ENRICHED_TASK",
   "detected_language": "en" | "es" | "fr" | "de" | "zh" | "ja" | "auto",
   "memory_probe": {
-    "entity": "Name or null",
+    "entity": "Proper noun / client / project name or null",
     "topic": "Normalized topic in user language or null",
     "time_anchor": "Time anchor in user language or null",
     "query_text": "Target search terms in user language"
   },
+  "extracted_entities": ["ProperNounEntity"],
   "semantic_concepts": ["concept1", "concept2", "concept3"],
   "suggested_missing_skill": "skill-name or null",
   "intent_summary_en": "Standardized 1-sentence imperative description in English",
@@ -253,8 +254,11 @@ class CognitiveTriage:
                     probe_data = data.get("memory_probe")
                     if isinstance(probe_data, dict):
                         ent = probe_data.get("entity") or (entities[0] if entities else None)
+                        ent_str = str(ent).strip() if ent else None
+                        if ent_str and ent_str not in entities:
+                            entities.insert(0, ent_str)
                         memory_probe = MemoryProbe(
-                            entity=str(ent).strip() if ent else None,
+                            entity=ent_str,
                             topic=str(probe_data.get("topic") or "").strip() or None,
                             time_anchor=str(probe_data.get("time_anchor") or "").strip() or None,
                             query_text=str(probe_data.get("query_text") or original_text).strip()

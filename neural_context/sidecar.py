@@ -16,7 +16,15 @@ def compute_sha256(content: str) -> str:
 
 
 def tokenize(text: str) -> List[str]:
-    return [w.lower() for w in re.findall(r"\b[\w\-]{2,}\b", text, re.UNICODE)]
+    raw_tokens = [w.lower() for w in re.findall(r"\b[\w\-]{2,}\b", text, re.UNICODE)]
+    expanded: List[str] = []
+    for tok in raw_tokens:
+        expanded.append(tok)
+        if "-" in tok:
+            for part in tok.split("-"):
+                if len(part) >= 2:
+                    expanded.append(part)
+    return expanded
 
 
 def extract_frontmatter_and_lead(content: str) -> Tuple[str, str]:
@@ -202,7 +210,7 @@ class SidecarIndex:
         Calculates Robertson/BM25 scores over indexed skill leads.
         Applies a normative priority boost if the skill is project-local.
         """
-        q_tokens = tokenize(query)
+        q_tokens = list(dict.fromkeys(tokenize(query)))
         scores: Dict[str, float] = {}
 
         for t in q_tokens:

@@ -66,9 +66,6 @@ class GraphRouter(SkillRouterBackend):
     ) -> Optional[SkillCandidate]:
         if not candidates:
             return None
-        if len(candidates) == 1:
-            cand, score = candidates[0]
-            return cand if score >= 0.2 else None
 
         import re
 
@@ -80,7 +77,15 @@ class GraphRouter(SkillRouterBackend):
 
         for c, _ in candidates:
             raw_text = f"{c.name} {c.description} {c.lead_paragraph}".lower()
-            tokens = re.findall(r"[\w-]{3,}", raw_text, re.UNICODE)
+            raw_tokens = re.findall(r"[\w-]{2,}", raw_text, re.UNICODE)
+            tokens: List[str] = []
+            for tok in raw_tokens:
+                if len(tok) >= 3 or tok in ("ai", "db", "ci", "cd", "pr", "ui", "ux"):
+                    tokens.append(tok)
+                if "-" in tok:
+                    for part in tok.split("-"):
+                        if len(part) >= 3:
+                            tokens.append(part)
             total = len(tokens) or 1
             freqs: Dict[str, int] = {}
             for t in tokens:
@@ -96,24 +101,35 @@ class GraphRouter(SkillRouterBackend):
         # Build seed activation vector from broad semantic concepts and domain context
         seeds: Dict[str, float] = {}
         concepts = analysis.semantic_concepts or analysis.required_capabilities or []
+        concept_weight = 1.5 if domain_context else 3.0
+        subtoken_weight = 1.0 if domain_context else 1.5
         for concept in concepts:
             c_clean = concept.strip().lower()
             if not c_clean:
                 continue
-            seeds[c_clean] = seeds.get(c_clean, 0.0) + 3.0
+            seeds[c_clean] = seeds.get(c_clean, 0.0) + concept_weight
             for token in re.findall(r"[\w-]{3,}", c_clean):
-                seeds[token] = seeds.get(token, 0.0) + 1.5
+                seeds[token] = seeds.get(token, 0.0) + subtoken_weight
+                if "-" in token:
+                    for part in token.split("-"):
+                        if len(part) >= 3:
+                            seeds[part] = seeds.get(part, 0.0) + subtoken_weight
 
         if analysis.intent_summary_en:
+            intent_w = 0.5 if domain_context else 1.0
             for token in re.findall(r"[\w-]{3,}", analysis.intent_summary_en.lower()):
-                seeds[token] = seeds.get(token, 0.0) + 1.0
+                seeds[token] = seeds.get(token, 0.0) + intent_w
 
         if domain_context:
             for token in re.findall(r"[\w-]{3,}", domain_context.lower()):
-                seeds[token] = seeds.get(token, 0.0) + 3.0  # High domain ground-truth energy
+                seeds[token] = seeds.get(token, 0.0) + 5.0  # High domain ground-truth energy
+                if "-" in token:
+                    for part in token.split("-"):
+                        if len(part) >= 3:
+                            seeds[part] = seeds.get(part, 0.0) + 5.0
 
         if not seeds:
-            return candidates[0][0]
+            return candidates[0][0] if candidates[0][1] >= 0.3 else None
 
         seed_sum = sum(seeds.values()) or 1.0
         p0_concepts = {k: v / seed_sum for k, v in seeds.items()}
@@ -127,8 +143,15 @@ class GraphRouter(SkillRouterBackend):
                 for s in connected:
                     skill_scores[s] += share * skill_edges[s].get(concept, 1.0)
 
-        # Combine with normalized BM25 score as prior
+        # Require actual concept overlap when only 1 candidate is present
         max_bm25 = max(score for _, score in candidates) or 1.0
+        if len(candidates) == 1:
+            only_cand, only_bm25 = candidates[0]
+            if skill_scores.get(only_cand.name, 0.0) <= 0.0 and only_bm25 < 1.5:
+                return None
+            return only_cand if only_bm25 >= 0.2 else None
+
+        # Combine with normalized BM25 score as prior
         ranked: List[Tuple[SkillCandidate, float]] = []
         for c, bm25_score in candidates:
             norm_bm25 = bm25_score / max_bm25
@@ -139,7 +162,7 @@ class GraphRouter(SkillRouterBackend):
         ranked.sort(key=lambda x: x[1], reverse=True)
         top_cand, top_score = ranked[0]
         # Require meaningful signal: reject pure noise / residual matches
-        if top_score < 0.15 and max_bm25 < 0.3:
+        if (top_score < 0.15 and max_bm25 < 0.3) or (skill_scores.get(top_cand.name, 0.0) <= 0.0 and max_bm25 < 1.5):
             return None
         return top_cand
 
@@ -163,14 +186,13 @@ class HostLLMRouter(SkillRouterBackend):
         if not candidates:
             return None
         if len(candidates) == 1:
-            cand, score = candidates[0]
-            return cand if score >= 0.2 else None
+            return self.fallback.route(analysis, candidates, domain_context=domain_context)
 
-        # If ctx.llm is not available, fall back to heuristic
+        # If ctx.llm is not available, fall back to graph router
         if self.ctx is None or not hasattr(self.ctx, "llm") or self.ctx.llm is None:
             return self.fallback.route(analysis, candidates, domain_context=domain_context)
 
-        shortlist = candidates[:4]
+        shortlist = candidates[:6]
         options_text = "\n".join([
             f"- {c.name}: {c.description} | {c.lead_paragraph[:120]}"
             for c, _ in shortlist
@@ -184,6 +206,13 @@ class HostLLMRouter(SkillRouterBackend):
         ]
         if domain_context:
             prompt_lines.append(f"Domain Context from Memory: {domain_context}")
+            prompt_lines.append(
+                "\nIMPORTANT: 'Domain Context from Memory' contains verified architectural facts "
+                "about the target entity discovered in Phase 1. When the User Task is a shorthand "
+                "or general request about that entity (e.g., 'Review AcmeCorp', 'Check project X'), "
+                "you MUST ground the request in the technical stack and integrations revealed by Memory "
+                "and select the specialized skill that governs that stack (rather than a generic review skill or 'NONE')."
+            )
         prompt_lines.extend([
             f"\nCandidate Skills:\n{options_text}\n",
             "Reply ONLY with the exact name of the selected skill, or 'NONE':"
@@ -203,6 +232,8 @@ class HostLLMRouter(SkillRouterBackend):
             for cand, _ in shortlist:
                 if cand.name.lower() in choice.lower():
                     return cand
+            if domain_context:
+                return self.fallback.route(analysis, candidates, domain_context=domain_context)
         except Exception:
             return self.fallback.route(analysis, candidates, domain_context=domain_context)
 
@@ -330,7 +361,21 @@ class ContextCoordinator:
                 query_parts.append(memory_hints)
 
             query = " ".join(query_parts) if query_parts else user_message
-            candidates = self.sidecar.search_bm25(query=query, top_k=5)
+            base_candidates = self.sidecar.search_bm25(query=query, top_k=5)
+            if memory_hints:
+                mem_candidates = self.sidecar.search_bm25(query=memory_hints, top_k=4)
+                merged_map: Dict[str, Tuple[SkillCandidate, float]] = {}
+                for cand, sc in mem_candidates:
+                    boosted = sc * 1.35
+                    cand_copy = cand.model_copy()
+                    cand_copy.score = boosted
+                    merged_map[cand.name] = (cand_copy, boosted)
+                for cand, sc in base_candidates:
+                    if cand.name not in merged_map or sc > merged_map[cand.name][1]:
+                        merged_map[cand.name] = (cand, sc)
+                candidates = sorted(merged_map.values(), key=lambda x: x[1], reverse=True)[:6]
+            else:
+                candidates = base_candidates
             selected_skill = self.router.route(analysis, candidates, domain_context=memory_hints)
 
             if selected_skill and Path(selected_skill.path).is_file():
