@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -142,3 +143,48 @@ def test_multi_tier_skill_discovery(tmp_path: Path):
     assert "profile_tool" in global_names
     assert "shared_tool" in global_names
     assert "local_tool" in local_names
+
+
+def test_triage_uses_sufficient_max_tokens_budget_for_reasoning_models():
+    """Ensure host LLM complete() receives max_tokens >= 1200 to prevent reasoning token truncation."""
+    mock_llm = MagicMock()
+    mock_llm.complete.return_value = '{"route": "DIRECT_REPLY", "reasoning": "greeting"}'
+
+    mock_ctx = MagicMock()
+    mock_ctx.llm = mock_llm
+
+    triage = CognitiveTriage(ctx=mock_ctx)
+    triage.analyze("Hola")
+
+    assert mock_llm.complete.called
+    kwargs = mock_llm.complete.call_args[1]
+    assert kwargs.get("max_tokens", 0) >= 1200
+    assert kwargs.get("max_tokens") == 1500
+
+
+def test_enriched_task_routing_with_named_entity():
+    """Ensure actionable task referencing a specific client entity triggers ENRICHED_TASK route."""
+    triage = CognitiveTriage()
+    domain = DomainClassification(is_software_task=True)
+
+    json_reply = json.dumps({
+        "route": "ENRICHED_TASK",
+        "memory_probe": {
+            "entity": "AcmeCorp",
+            "topic": "pixel CAPI",
+            "query_text": "AcmeCorp"
+        },
+        "semantic_concepts": ["meta-pixel", "capi"],
+        "extracted_entities": ["AcmeCorp"],
+        "intent_summary_en": "Implement Meta CAPI for client AcmeCorp",
+        "search_query": "When the user needs to implement meta pixel capi",
+        "reasoning": "Technical task referencing client AcmeCorp requires past configuration facts."
+    })
+
+    result = triage._parse_structured_output(json_reply, "Implementa el pixel CAPI de Meta para AcmeCorp", domain)
+    assert result.route == CognitiveRoute.ENRICHED_TASK
+    assert result.needs_skills is True
+    assert result.needs_memory is True
+    assert result.memory_probe is not None
+    assert result.memory_probe.entity == "AcmeCorp"
+

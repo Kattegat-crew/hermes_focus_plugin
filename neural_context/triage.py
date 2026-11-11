@@ -47,9 +47,9 @@ SECTION 3: 4-QUADRANT ROUTE CLASSIFICATION
 ================================================================================
 Classify the turn into exactly ONE route:
 - DIRECT_REPLY: The communicative intent is purely phatic, social courtesy, conversational acknowledgement, or open general dialogue that has no procedural task objective, requires no execution of specialized tools, and has no dependency on historical project facts (0 tokens injected). When the utterance serves an interpersonal social function rather than delegating an actionable technical objective, classify strictly as DIRECT_REPLY and leave semantic_concepts and search_query empty.
-- SKILL_ONLY: The user explicitly requests executing a concrete procedural action, software modification, or specialized workflow with NO historical context dependency.
-- MEMORY_ONLY: The user asks about historical facts, agreements, decisions, or past session context, WITHOUT requesting a complex procedural tool execution.
-- ENRICHED_TASK: Complex domain task tied to historical context (executes Phase 1 memory probe to ground facts, then Phase 2 memory-enriched skill routing).
+- SKILL_ONLY: The user explicitly requests executing a generic procedural action, tool workflow, or coding task WITHOUT any reference to a specific client, brand, or named project entity (e.g., 'how do I configure git rebase', 'escribe un script de ffmpeg para cortar video').
+- MEMORY_ONLY: The user asks about historical facts, agreements, decisions, or past session context, WITHOUT requesting a new procedural tool execution or software implementation.
+- ENRICHED_TASK: Any actionable technical, software, or procedural task that references a specific client, brand, project, repository, or named entity (e.g., 'para AcmeCorp', 'en el proyecto X', 'revisa y arregla el pipeline de Y', 'implementa el pixel CAPI de Meta para AcmeCorp'). Executes Phase 1 to retrieve domain ground-truth and architectural facts about that entity from memory, then executes Phase 2 memory-enriched skill routing to select and inject the winning procedural tool. Whenever an actionable request mentions a specific client or project entity, prioritize ENRICHED_TASK so domain facts ground the execution.
 
 ================================================================================
 OUTPUT SPECIFICATION (Pure JSON only):
@@ -120,9 +120,10 @@ class CognitiveTriage:
     Synthesizes dual-form queries and capability nouns to maximize skill retrieval accuracy.
     """
 
-    def __init__(self, ctx: Any = None, model_fn: Optional[Callable[[str], str]] = None):
+    def __init__(self, ctx: Any = None, model_fn: Optional[Callable[[str], str]] = None, max_tokens: int = 1500):
         self.ctx = ctx
         self.model_fn = model_fn
+        self.max_tokens = max_tokens
 
     def analyze(self, user_message: str, cwd: Optional[str] = None) -> TriageAnalysis:
         clean_text = user_message.strip()
@@ -152,9 +153,11 @@ class CognitiveTriage:
         if self.ctx is not None and hasattr(self.ctx, "llm") and self.ctx.llm is not None:
             try:
                 # Hermes Agent PluginLlm.complete expects messages: list[dict[str, Any]]
+                # Use budget of 1500 tokens to ensure reasoning models (e.g. DeepSeek, o1, Qwen thinking)
+                # have sufficient headroom for thought tokens before emitting structured JSON.
                 resp = self.ctx.llm.complete(
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=300,
+                    max_tokens=self.max_tokens,
                     temperature=0.0
                 )
                 if hasattr(resp, "text") and isinstance(resp.text, str):
