@@ -38,8 +38,33 @@ _triage: Optional[CognitiveTriage] = None
 _coordinator: Optional[ContextCoordinator] = None
 _receipt_emitter: Optional[ReceiptEmitter] = None
 
-# Thread-safe / session-isolated store for turn state: key -> (TriageAnalysis, RouteResult)
-_session_turns: Dict[str, Tuple[TriageAnalysis, RouteResult]] = {}
+# Thread-safe / session-isolated store for turn state: key -> (TriageAnalysis, RouteResult, platform, model)
+_session_turns: Dict[str, Tuple[TriageAnalysis, RouteResult, str, str]] = {}
+
+
+def extract_message_text(user_message: Any) -> str:
+    """
+    Extract clean textual prompt from diverse channel formats:
+    plain text (CLI), list of content blocks (Discord/Telegram/WhatsApp/Desktop),
+    or multimodal payload dicts.
+    """
+    if isinstance(user_message, str):
+        return user_message.strip()
+    if isinstance(user_message, list):
+        parts = []
+        for item in user_message:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                val = item.get("text") or item.get("content")
+                if isinstance(val, str):
+                    parts.append(val)
+        return " ".join(parts).strip()
+    if isinstance(user_message, dict):
+        val = user_message.get("text") or user_message.get("content")
+        if isinstance(val, str):
+            return val.strip()
+    return str(user_message or "").strip()
 
 
 def _get_services(ctx: Any = None):
@@ -65,7 +90,7 @@ def _get_services(ctx: Any = None):
 
 def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[str, str]]:
     """
-    Hook body called before LLM inference.
+    Hook body called before LLM inference across any platform (CLI, WhatsApp, Telegram, Discord, Desktop).
     Appends ephemeral context to the USER message turn.
     Returns None if nothing fits or on any error (fail-closed).
     """
@@ -77,13 +102,16 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
     if not _config.enabled or not _config.pre_hook_enabled:
         return None
 
-    text = str(user_message or "").strip()
+    text = extract_message_text(user_message)
     if not text:
         return None
 
     turn_id = str(kwargs.get("turn_id", ""))
     session_id = str(kwargs.get("session_id", ""))
     turn_key = f"{session_id}:{turn_id}"
+
+    platform = str(kwargs.get("platform") or getattr(getattr(ctx, "agent", None), "platform", None) or "cli").lower()
+    model_name = str(kwargs.get("model") or getattr(getattr(ctx, "agent", None), "model", None) or "").strip()
 
     try:
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
@@ -92,7 +120,7 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
         result = coordinator.execute(analysis, user_message=text, cwd=cwd)
 
         # Store session/turn state isolated from concurrent sessions
-        _session_turns[turn_key] = (analysis, result)
+        _session_turns[turn_key] = (analysis, result, platform, model_name)
 
         if result.combined_context_block:
             return {"context": result.combined_context_block}
@@ -117,7 +145,7 @@ def on_post_llm_call(response: Any = None, **kwargs: Any) -> None:
     if turn_data is None:
         return
 
-    analysis, route_result = turn_data
+    analysis, route_result, platform, model_name = turn_data
     if analysis is None or route_result is None:
         return
 
@@ -128,7 +156,9 @@ def on_post_llm_call(response: Any = None, **kwargs: Any) -> None:
             turn_id=turn_id,
             session_id=session_id,
             analysis=analysis,
-            route_result=route_result
+            route_result=route_result,
+            platform=platform,
+            model=model_name
         )
     except Exception as exc:
         logger.warning("neural-context-plugin post_llm_call receipt error: %s", exc)

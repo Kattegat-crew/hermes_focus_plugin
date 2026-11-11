@@ -24,11 +24,15 @@ class ReceiptEmitter:
         session_id: str,
         analysis: TriageAnalysis,
         route_result: RouteResult,
-        error: Optional[str] = None
+        error: Optional[str] = None,
+        platform: str = "cli",
+        model: str = ""
     ) -> ReceiptRecord:
         record = ReceiptRecord(
             turn_id=turn_id,
             session_id=session_id,
+            platform=platform,
+            model=model,
             is_task=analysis.is_actionable_task,
             domain="software" if analysis.domain.is_software_task else "general",
             entities_detected=analysis.extracted_entities,

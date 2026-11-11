@@ -249,3 +249,48 @@ def test_memory_injection_defense(tmp_path):
     # Ensure injection lines were rejected
     assert not any("<system>" in f for f in facts)
     assert not any("unrestricted assistant" in f for f in facts)
+
+
+def test_graph_router_semantic_activation():
+    """
+    Verifies that the GraphRouter uses bipartite spreading activation
+    to select the winning skill using domain memory concepts without any LLM.
+    """
+    from neural_context.router import GraphRouter
+    from neural_context.models import SkillCandidate, TriageAnalysis
+
+    candidates = [
+        (SkillCandidate(
+            name="stripe-billing",
+            description="Automate subscriptions, webhooks, and invoice management with Stripe API",
+            lead_paragraph="Stripe billing engine integration for recurring SaaS payments and checkout.",
+            path="/tmp/stripe"
+        ), 0.8),
+        (SkillCandidate(
+            name="docker-compose",
+            description="Manage multi-container Docker deployments and networking",
+            lead_paragraph="Docker orchestration and compose service configuration.",
+            path="/tmp/docker"
+        ), 0.75),
+    ]
+
+    analysis = TriageAnalysis(
+        is_actionable_task=True,
+        intent_summary_en="Audit client payment gateway and recurring subscriptions",
+        required_capabilities=["billing", "checkout", "invoicing"]
+    )
+
+    router = GraphRouter()
+    # Without domain context, capability seeds alone activate stripe-billing
+    winner = router.route(analysis, candidates)
+    assert winner is not None
+    assert winner.name == "stripe-billing"
+
+    # With domain context from memory (e.g. AcmeCorp uses Stripe webhooks), activation reinforces stripe-billing
+    winner_with_mem = router.route(
+        analysis,
+        candidates,
+        domain_context="AcmeCorp uses Stripe webhooks and recurring customer cards"
+    )
+    assert winner_with_mem is not None
+    assert winner_with_mem.name == "stripe-billing"

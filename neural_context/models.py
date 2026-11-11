@@ -99,6 +99,8 @@ class ReceiptRecord(BaseModel):
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     turn_id: str = ""
     session_id: str = ""
+    platform: str = "cli"
+    model: str = ""
     is_task: bool = True
     domain: str = "general"
     entities_detected: List[str] = Field(default_factory=list)

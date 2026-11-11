@@ -5,7 +5,7 @@ Cognitive context engine, selective memory ingestion, and single-step skill rout
 
 from .config import PluginConfig
 from .models import DomainClassification, MemoryItem, ReceiptRecord, RouteResult, SkillCandidate, TriageAnalysis
-from .router import ContextCoordinator, FastHeuristicRouter, HostLLMRouter, JevRouter, SkillRouterBackend
+from .router import ContextCoordinator, FastHeuristicRouter, GraphRouter, HostLLMRouter, JevRouter, SkillRouterBackend
 from .sidecar import SidecarIndex
 from .triage import CognitiveTriage
 
@@ -21,6 +21,7 @@ __all__ = [
     "CognitiveTriage",
     "SkillRouterBackend",
     "FastHeuristicRouter",
+    "GraphRouter",
     "HostLLMRouter",
     "JevRouter",
     "ContextCoordinator",

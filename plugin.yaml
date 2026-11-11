@@ -36,6 +36,7 @@ config_schema:
   router_backend:
     type: str
     default: "host_llm"
+    description: "Router engine: 'host_llm' (uses user active model with graph fallback), 'graph' (100% free graph-theoretic semantic router), or 'jev'"
   max_context_tokens:
     type: int
     default: 1200

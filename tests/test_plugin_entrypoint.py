@@ -92,3 +92,61 @@ def test_plugin_disabled_fast_path(tmp_path):
     # Must immediately return None without creating turn state
     assert res is None
     assert "session_disabled:turn_disabled" not in plugin_entry._session_turns
+
+
+def test_multichannel_message_extraction():
+    import __init__ as plugin_entry
+
+    # 1. Plain string (CLI)
+    assert plugin_entry.extract_message_text("Hello from CLI") == "Hello from CLI"
+
+    # 2. List of text content objects (Discord / Telegram / WhatsApp bots)
+    discord_payload = [
+        {"type": "text", "text": "Can you check the database status?"}
+    ]
+    assert plugin_entry.extract_message_text(discord_payload) == "Can you check the database status?"
+
+    # 3. Multimodal list with text and image
+    whatsapp_payload = [
+        {"type": "text", "text": "Here is the error screenshot:"},
+        {"type": "image_url", "image_url": "https://example.com/err.png"}
+    ]
+    assert plugin_entry.extract_message_text(whatsapp_payload) == "Here is the error screenshot:"
+
+    # 4. Dictionary format (Desktop / Electron IPC)
+    desktop_payload = {"content": "Inspect Docker container"}
+    assert plugin_entry.extract_message_text(desktop_payload) == "Inspect Docker container"
+
+
+def test_multichannel_turn_receipt(tmp_path):
+    import __init__ as plugin_entry
+
+    mock_ctx = MagicMock()
+    mock_ctx.cwd = str(tmp_path)
+    mock_ctx.get_config.side_effect = lambda key, default=None: default
+    plugin_entry._config = None
+
+    # Pre-call from Telegram bot on Qwen model
+    plugin_entry.on_pre_llm_call(
+        user_message=[{"text": "Hola bot"}],
+        _ctx=mock_ctx,
+        session_id="tg_session",
+        turn_id="tg_turn_1",
+        platform="telegram",
+        model="qwen-2.5-coder"
+    )
+
+    turn_key = "tg_session:tg_turn_1"
+    assert turn_key in plugin_entry._session_turns
+    analysis, result, platform, model = plugin_entry._session_turns[turn_key]
+    assert platform == "telegram"
+    assert model == "qwen-2.5-coder"
+
+    # Post-call pops and cleans up
+    plugin_entry.on_post_llm_call(
+        response="Hola humano",
+        _ctx=mock_ctx,
+        session_id="tg_session",
+        turn_id="tg_turn_1"
+    )
+    assert turn_key not in plugin_entry._session_turns
