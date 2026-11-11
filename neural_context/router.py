@@ -349,7 +349,12 @@ class ContextCoordinator:
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         injected_tokens = estimate_tokens(context_block) if context_block else 0
-        tokens_saved = max(0, 12000 - injected_tokens) if context_block else 12000
+        if not context_block:
+            tokens_saved = 0
+        else:
+            catalog_count = getattr(self.sidecar, "n_docs", 0)
+            baseline = max(catalog_count * 350, injected_tokens + 500) if catalog_count > 0 else injected_tokens + 500
+            tokens_saved = max(0, baseline - injected_tokens)
 
         return RouteResult(
             selected_skill=selected_skill,

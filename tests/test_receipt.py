@@ -41,3 +41,5 @@ def test_receipt_emitter(tmp_path):
     assert stats["actionable_tasks"] == 1
     assert stats["skills_routed"] == 1
     assert stats["total_tokens_saved"] == 11200
+    assert stats["token_reduction_pct"] > 90.0
+    assert stats["fast_exit_pct"] == 0.0

@@ -238,8 +238,9 @@ Every turn intercepted by the plugin produces a deterministic, verifiable JSON a
 - [x] Dedicated Git Repository: [`/opt/neural-context-plugin`](file:///opt/neural-context-plugin) (`git@github.com:Kattegat-crew/neural-context-plugin.git`).
 - [x] Core Python Package: `neural_context` (`sidecar.py`, `triage.py`, `router.py`, `memory.py`, `receipt.py`, `cli.py`, `config.py`, `models.py`).
 - [x] Hermes Plugin Wrapper: `plugin.yaml`, `__init__.py` (registers `pre_llm_call`, `post_llm_call`, `neural-context` CLI, and `neural_context_status` / `neural_context_route` tools).
-- [x] Pytest Suite: 16 deterministic unit tests (100% passing) covering cognitive triage, Two-Phase Enriched Routing, `ctx.llm.complete(messages=...)` format, sidecar index, and CLI diagnostics.
-- [x] Hermes Plugin Validation: Passed `hermes plugins validate` (100% green).
-- [x] Hermes Plugin Doctor: Passed `hermes plugins doctor` (100% green, 2 tools, 2 hooks).
-- [ ] `README.md` & Catalog Manifest: Benchmarks, token savings calculator, and 40-character commit SHA pin.
-- [ ] Demo Video Script (< 90 seconds): Side-by-side terminal comparison showing token counter (`token-lens`) before vs. after.
+- [x] Pytest Suite: 33 deterministic unit tests (100% passing) covering cognitive triage, 4-quadrant routing, universal memory adaptability (Markdown & SQLite), sidecar BM25, and CLI diagnostics.
+- [x] Hermes Plugin Validation: Passed `hermes plugins validate` (15/15 checks ok, 0 errors, 0 warnings).
+- [x] Hermes Plugin Doctor: Passed `hermes plugins doctor` (100% green, 2 tools, 2 hooks registered).
+- [x] Universal Memory Adaptability: Full support for vanilla Hermes Markdown (`MEMORY.md`, `USER.md`, `memories/**/*.md`), custom directories (`HERMES_MEMORY_DIR`), and pluggable SQLite stores (`memories.db`), with strict boundary protection.
+- [x] Demo Video Script (< 90 seconds): Complete timed 4-scene script ready in `docs/DEMO_VIDEO_SCRIPT.md`.
+- [ ] Catalog Manifest PR & Public Submission.

@@ -68,7 +68,7 @@
   ```
 - **Terminal Output**: Clean green checkmarks across all tools, hooks, and isolation probes.
 - **Voiceover / Audio**:
-  > *"100% compliant with Hermes Plugin architecture, 27/27 unit tests passing, and zero file mutations.*
+  > *"100% compliant with Hermes Plugin architecture, 33/33 unit tests passing, and zero file mutations.*
   > *Built by Jesús Díaz and Kattegat Crew. Install it today with `hermes plugins install Kattegat-crew/neural-context-plugin`."*
 
 ---

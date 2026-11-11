@@ -91,7 +91,9 @@ class ReceiptEmitter:
         routed = sum(1 for r in records if r.selected_skill)
         avg_lat = sum(r.triage_latency_ms for r in records) / total_turns
         tokens_saved = sum(r.tokens_saved_estimate for r in records)
-        token_reduction_pct = round((tokens_saved / (12000 * total_turns)) * 100, 1) if total_turns > 0 else 0.0
+        total_injected = sum(r.skill_injected_tokens + r.memory_injected_tokens for r in records)
+        total_potential = tokens_saved + total_injected
+        token_reduction_pct = round((tokens_saved / total_potential) * 100, 1) if total_potential > 0 else 0.0
         fast_exit_pct = round(((total_turns - actionable) / total_turns) * 100, 1) if total_turns > 0 else 0.0
 
         return {
