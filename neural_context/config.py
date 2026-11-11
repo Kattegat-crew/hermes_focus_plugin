@@ -45,9 +45,9 @@ class PluginConfig(BaseModel):
     enabled: bool = True
     pre_hook_enabled: bool = True
     router_backend: str = "host_llm"
-    max_context_tokens: int = 2500
+    max_context_tokens: int = 0  # 0 = unlimited by default, preserves full procedural depth
     selective_memory_enabled: bool = True
-    memory_token_budget: int = 400
+    memory_token_budget: int = 0  # 0 = unlimited by default, preserves all relevant facts
     software_inspection_enabled: bool = True
     sidecar_db_path: str = ""
     receipts_path: str = ""

@@ -2,26 +2,28 @@
 
 [![Hermes Agent Plugin](https://img.shields.io/badge/hermes--agent-plugin%20v1-blue.svg)](https://hermes-agent.nousresearch.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Validation](https://img.shields.io/badge/hermes%20plugins%20validate-passing-brightgreen.svg)]()
+[![Validation](https://img.shields.io/badge/hermes%20plugins%20validate-15%2F15%20passing-brightgreen.svg)]()
 [![Doctor](https://img.shields.io/badge/hermes%20plugins%20doctor-healthy-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-34%20passed-brightgreen.svg)]()
 
-> **Cognitive semantic context engine for Hermes Agent**: intercepts turns prior to inference, extracts true intent and entities, executes Two-Phase Context-Enriched routing, prioritizes repository governance, and injects winning skills in a single step with zero KV-cache mutation.
+> **Cognitive semantic context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
 
 ---
 
 ## The Problem: The Mature Agent Dilemma
 
-In standard LLM agent systems, context provisioning faces an architectural dilemma that compounds as the deployment grows:
+In production LLM agent environments, context provisioning faces compound scaling challenges as deployments evolve:
 
-1. **Static Bloat**: As users install specialized skills over time (from dozens to hundreds of skills), injecting the static skill catalog into the System Prompt costs ~25–30 tokens per skill on **every single turn**. A catalog of 500 skills wastes ~12,000–15,000 tokens per interaction and degrades time-to-first-token (TTFT).
-2. **Cold Start / Blind Routing**: Running in `on_demand: true` strips all context, forcing the model to guess which skills exist and burn extra round-trips calling `skill_search`.
-3. **The Failure of Raw Lexical Matching**: Real-world user prompts are frequently ambiguous, conversational, or written in another language (e.g., Spanish requests against an English catalog). Users describe **goals**, not skill names. Naive keyword search fails in nearly 100% of ambiguous queries.
+1. **Static Catalog Bloat**: Loading an entire skill catalog into the System Prompt consumes significant token overhead on every single turn, increasing operational costs and degrading Time-to-First-Token (TTFT).
+2. **Cold Start & Blind Routing**: Disabling catalog loading forces the model to guess which skills exist and waste additional tool-call round trips searching for them.
+3. **Semantic Mismatches**: User prompts are frequently conversational, cross-lingual, or describe high-level goals without naming specific tools. Naive lexical search fails when prompts omit canonical keywords.
+4. **Context Amputation**: Hardcoded token truncations often clip critical step-by-step instructions or architecture facts when agents handle complex tasks.
 
 ---
 
 ## The Architecture: Two-Phase Context-Enriched Routing
 
-`neural-context-plugin` operates at the native `pre_llm_call` hook:
+`neural-context-plugin` hooks natively into `pre_llm_call` to resolve context before the primary agent model executes:
 
 ```
                           [ Incoming User Message ]
@@ -31,56 +33,48 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
                                      │
                                      ▼
         ┌─────────────────────────────────────────────────────────┐
-        │        STEP 1: COGNITIVE SEMANTIC INTERPRETER           │
-        │  - Evaluates message intent with model (ctx.llm)        │
-        │  - Synthesizes dual-form English search query           │
-        │  - Extracts named entities (brands, projects, clients)  │
-        │  - Determines if task requires procedural skills/memory │
+        │ STEP 1: COGNITIVE ARBITER & TRIAGE                      │
+        │ - Model-driven intent interpretation (ctx.llm)          │
+        │ - 4-Quadrant Routing Decision:                          │
+        │   • DIRECT_REPLY: Casual greeting ➔ Fast exit (0 tokens)│
+        │   • SKILL_ONLY: Procedural execution, no history needed │
+        │   • MEMORY_ONLY: Fact recall, bypasses skill overhead   │
+        │   • ENRICHED_TASK: Complex task ➔ Two-phase routing    │
+        │ - Synthesizes broad semantic concepts & entities        │
         └────────────────────────────┬────────────────────────────┘
                                      │
                                      ▼
         ┌─────────────────────────────────────────────────────────┐
-        │            STEP 1: COGNITIVE ARBITER                    │
-        │  - Evaluates message before model execution (ctx.llm)   │
-        │  - Classifies into 4 Quadrants:                         │
-        │    Q1: Direct Reply (Fast Exit, 0 tokens)               │
-        │    Q2: Skill Only (Independent of past history)         │
-        │    Q3: Memory Only (Recalls facts, bypasses skills)     │
-        │    Q4: Enriched Task (Memory probe -> Skill route)      │
-        │  - Dimensional Query Synthesis (Subject, Scope, Intent) │
-        └────────────────────────────┬────────────────────────────┘
-                                     │
-                                     ▼
-        ┌─────────────────────────────────────────────────────────┐
-        │            STEP 2: CONTEXT BROKER ORCHESTRATION         │
+        │ STEP 2: TWO-PHASE CONTEXT ENRICHMENT                    │
         │                                                         │
-        │ Phase 1: Surgical Memory Probe (Domain Ground Truth)    │
-        │  - Queries memory strictly for extracted named entities │
-        │  - Extracts factual hints (e.g. AcmeCorp stack)         │
+        │ Phase 1: Universal Surgical Memory Probe                │
+        │ - Reads vanilla Hermes Markdown (PROJECT_MEMORY, USER)  │
+        │ - Recursively scans memories/**/*.md & custom env paths │
+        │ - Read-only safe inspection of SQLite stores (mode=ro)  │
+        │ - Strict path-traversal & symlink boundary defenses     │
         │                                                         │
-        │ Phase 2: Information-Weighted Graph Routing             │
-        │  - Bipartite Concept Spreading Activation               │
-        │  - Multi-hop traversal: Concept -> Domain -> Winning Skill│
-        │  - 100% Free, offline, sub-ms; Host LLM fallback on tie │
-        │  - Local workspace AGENTS.md/.skills/ sovereignty       │
+        │ Phase 2: Grounded Skill Routing                         │
+        │ - Enriches skill search with discovered domain facts    │
+        │ - Bipartite Concept Graph spreading activation          │
+        │ - Sub-5ms BM25 ranking over SQLite sidecar index        │
+        │ - Skill gap detection: suggests missing capabilities    │
         └────────────────────────────┬────────────────────────────┘
                                      │
                                      ▼
         ┌─────────────────────────────────────────────────────────┐
-        │     STEP 3: SINGLE-STEP SKILL & MEMORY INGESTION        │
-        │  - Ingest winning SKILL.md body immediately             │
-        │  - Eliminates secondary round-trip tool calls           │
-        │  - Dynamic token optimization: minimize per turn        │
-        │    without sacrificing necessary procedural depth       │
+        │ STEP 3: SINGLE-STEP EPHEMERAL INJECTION                 │
+        │ - Full procedural depth preserved by default (unlimited)│
+        │ - Optional configurable ceilings for constrained models │
+        │ - Ingests complete winning SKILL.md immediately         │
+        │ - Eliminates secondary tool round-trips                 │
         └────────────────────────────┬────────────────────────────┘
                                      │
                                      ▼
         ┌─────────────────────────────────────────────────────────┐
-        │      STEP 4: EPHEMERAL INJECTION & AUDIT RECEIPT        │
-        │  - Injects context into USER message turn               │
-        │  - System Prompt remains 100% BYTE-STABLE (KV-Cache OK) │
-        │  - Emits verifiable audit record to `receipts.jsonl`    │
-        │  - Tracks channel platform & active model provenance    │
+        │ STEP 4: USER TURN INJECTION & AUDIT RECEIPT             │
+        │ - Appends context block strictly to the USER message    │
+        │ - System Prompt remains 100% BYTE-STABLE (KV-cache safe)│
+        │ - Emits auditable execution record to `receipts.jsonl`  │
         └────────────────────────────┬────────────────────────────┘
                                      │
                                      ▼
@@ -91,18 +85,15 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
 
 ## Key Differentiators
 
-- **Cognitive Arbiter (4-Quadrant Triage)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`, synthesizing dimensional search probes rather than doing naive full-dump injections.
-- **Zero-Cost Information-Weighted Graph Routing (`GraphRouter`)**: Uses bipartite concept spreading activation weighted by Information Content to resolve multi-hop context (e.g. `AcmeCorp` $\to$ domain stack $\to$ winning skill) in $<1\text{ ms}$ with zero external API fees.
-- **Multilingual Native-Language Memory Probing**: Preserves the user's native language in memory queries (supporting Spanish, French, German, Chinese, Japanese, etc.) without artificial translation hops that break lexical precision.
-- **Skill Gap Detection & Suggestions**: When a task genuinely requires a capability that is missing from the catalog, the plugin avoids false positive injections and instead produces an authoritative skill recommendation notice.
-- **Multichannel & Model-Agnostic**: Intercepts turns seamlessly across CLI, Discord, Telegram, WhatsApp, and Desktop, running on whatever active model the user configured in Hermes (`ctx.llm`).
-- **Two-Phase Context-Enriched Routing**: Memory facts and skill procedures are not isolated silos. Extracted named entities query memory first to establish domain ground truth, which enriches the skill search to pinpoint the exact winning procedural skill.
-- **Preserves KV-Cache Stability**: Unlike mechanisms that alter the System Prompt, returning ephemeral context from `pre_llm_call` appends to the user turn, keeping the system prompt byte-stable for maximum prompt-cache hits and lowest TTFT.
-- **Single-Step Ingestion**: Unlike existing routers that only emit a tag with the skill name (forcing the agent into a second round-trip costing ~20,000 tokens of re-sent context), Neural Context inlines the winning skill procedure immediately.
-- **Adaptive Token Optimization**: Dynamically bounds injected context (`max_context_tokens`, default: 2,500) with surgical line pruning at step boundaries, minimizing tokens per turn without arbitrarily truncating complex procedures.
-- **Repository Governance Sovereignty**: When working in a software repository with `AGENTS.md` and local `.skills/`, local project rules take absolute precedence over global catalog skills.
-- **Zero File Mutation & SHA-256 Sidecar Index**: User `SKILL.md` files are never touched or modified. All metadata is cached in SQLite (`sidecar_index.db`) and invalidated deterministically by file hash.
-- **Verifiable Audit Receipts**: Every turn writes a structured record to `receipts.jsonl` detailing execution latency, tokens saved, platform, active model, and routing status.
+- **Cognitive Arbiter (4 Quadrants)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`. Casual conversational turns exit in $<1\text{ ms}$ with 0 tokens injected.
+- **Universal Memory Adaptability**: Works out of the box with standard vanilla Hermes Markdown (`MEMORY.md`, `USER.md`, `PROJECT_MEMORY.md`, `memories/**/*.md`), supports custom directory configurations (`HERMES_MEMORY_DIR`), and provides read-only probing for SQLite stores (`memories.db`, `state.db`) without locking or schema dependencies.
+- **Preserves Full Context by Default**: Does not enforce artificial token ceilings by default (`0` = unlimited). Procedural depth and domain facts are fully preserved, with optional user-configurable budgets for smaller models.
+- **Zero KV-Cache Mutation**: Injects context exclusively into the ephemeral user message turn. The System Prompt remains byte-stable, maximizing prompt cache hits and minimizing latency.
+- **Single-Step Procedural Ingestion**: Directly provides the winning skill body, eliminating the multi-turn latency and context resending of secondary search tools.
+- **Information-Weighted Graph Routing**: Uses bipartite concept spreading activation in memory to resolve multi-hop relationships (e.g. project codename $\to$ tech stack $\to$ matching skill) with zero external API dependencies.
+- **Skill Gap Detection**: When an actionable task genuinely requires a capability absent from the catalog, the arbiter avoids false positive injections and returns an explicit capability notice.
+- **Zero File Mutation**: User skill repositories and profile files are never altered. Metadata is cached in a local SQLite sidecar (`sidecar_index.db`) keyed by SHA-256 hashes.
+- **Auditable Receipts**: Emits structured JSON records to `receipts.jsonl` tracking route decisions, injected tokens, latency, and model provenance.
 
 ---
 
@@ -115,16 +106,16 @@ hermes plugins install Kattegat-crew/neural-context-plugin
 
 ### CLI Subcommands
 ```bash
-# Check status and metrics
+# Check status and health metrics
 hermes neural-context status
 
-# Run system health diagnostics
+# Run plugin diagnostic checks
 hermes neural-context doctor
 
-# Index local skills into sidecar SQLite cache
+# Index local and catalog skills into sidecar SQLite cache
 hermes neural-context index
 
-# Verify recent turn receipts and token savings
+# Verify recent turn receipts and routing history
 hermes neural-context verify --limit 20
 ```
 
@@ -132,16 +123,18 @@ hermes neural-context verify --limit 20
 
 ## Configuration (`config.yaml`)
 
+Configure `neural-context-plugin` within your Hermes `config.yaml`:
+
 ```yaml
 plugins:
   entries:
     neural-context-plugin:
       enabled: true
       settings:
-        router_backend: "host_llm"      # "host_llm" (default, uses ctx.llm) | "heuristic" | "jev"
-        max_context_tokens: 1200        # Maximum tokens injected per turn
-        selective_memory_enabled: true  # Surgical recall based on detected entities
-        memory_token_budget: 400        # Maximum tokens for memory facts
+        router_backend: "host_llm"      # "host_llm" (default, uses ctx.llm) | "graph" | "jev"
+        max_context_tokens: 0           # 0 for unlimited (default, preserves full procedural depth)
+        memory_token_budget: 0          # 0 for unlimited (default, preserves all matching facts)
+        selective_memory_enabled: true  # Surgical memory probing based on extracted entities
         software_inspection_enabled: true
         timeout_ms: 250
 ```
@@ -151,13 +144,13 @@ plugins:
 ## Verification & Tests
 
 ```bash
-# Run test suite
+# Run pytest test suite (34 passing tests)
 pytest -v
 
-# Run Hermes Plugin validation
+# Run official Hermes Plugin validation (15/15 checks passed)
 hermes plugins validate .
 
-# Run Hermes Plugin doctor
+# Run official Hermes Plugin doctor (healthy)
 hermes plugins doctor .
 ```
 
@@ -165,4 +158,4 @@ hermes plugins doctor .
 
 ## License
 
-MIT License. Designed and authored by Jesús Díaz & NeuralCrew Labs Architecture Team.
+MIT License. Designed and authored by Jesús Díaz & NeuralCrew Labs.

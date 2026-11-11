@@ -238,7 +238,7 @@ Every turn intercepted by the plugin produces a deterministic, verifiable JSON a
 - [x] Dedicated Git Repository: [`/opt/neural-context-plugin`](file:///opt/neural-context-plugin) (`git@github.com:Kattegat-crew/neural-context-plugin.git`).
 - [x] Core Python Package: `neural_context` (`sidecar.py`, `triage.py`, `router.py`, `memory.py`, `receipt.py`, `cli.py`, `config.py`, `models.py`).
 - [x] Hermes Plugin Wrapper: `plugin.yaml`, `__init__.py` (registers `pre_llm_call`, `post_llm_call`, `neural-context` CLI, and `neural_context_status` / `neural_context_route` tools).
-- [x] Pytest Suite: 33 deterministic unit tests (100% passing) covering cognitive triage, 4-quadrant routing, universal memory adaptability (Markdown & SQLite), sidecar BM25, and CLI diagnostics.
+- [x] Pytest Suite: 34 deterministic unit tests (100% passing) covering cognitive triage, 4-quadrant routing, universal memory adaptability (Markdown & SQLite), sidecar BM25, and CLI diagnostics.
 - [x] Hermes Plugin Validation: Passed `hermes plugins validate` (15/15 checks ok, 0 errors, 0 warnings).
 - [x] Hermes Plugin Doctor: Passed `hermes plugins doctor` (100% green, 2 tools, 2 hooks registered).
 - [x] Universal Memory Adaptability: Full support for vanilla Hermes Markdown (`MEMORY.md`, `USER.md`, `memories/**/*.md`), custom directories (`HERMES_MEMORY_DIR`), and pluggable SQLite stores (`memories.db`), with strict boundary protection.

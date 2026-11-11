@@ -61,8 +61,8 @@ class SelectiveMemoryRetriever:
     - Strict boundary protection (rejection of sensitive system files and oversized files)
     """
 
-    def __init__(self, token_budget: int = 400):
-        self.token_budget = token_budget
+    def __init__(self, token_budget: int = 0):
+        self.token_budget = token_budget  # 0 = unlimited by default, preserves full context
 
     def retrieve(
         self,
@@ -162,7 +162,7 @@ class SelectiveMemoryRetriever:
         # 2. Extract Facts from Markdown Stores
         # -------------------------------------------------------------
         for fpath in candidate_files:
-            if current_tokens >= self.token_budget:
+            if self.token_budget > 0 and current_tokens >= self.token_budget:
                 break
             try:
                 content = fpath.read_text(encoding="utf-8", errors="ignore")
@@ -194,7 +194,7 @@ class SelectiveMemoryRetriever:
                         continue
                     seen_facts.add(trimmed)
                     tok = estimate_tokens(trimmed)
-                    if current_tokens + tok > self.token_budget:
+                    if self.token_budget > 0 and current_tokens + tok > self.token_budget:
                         break
                     results.append(MemoryItem(
                         entity=matched_entity,
@@ -208,14 +208,14 @@ class SelectiveMemoryRetriever:
         # 3. Extract Facts from Pluggable / Custom SQLite Stores
         # -------------------------------------------------------------
         for db_path in sqlite_candidates:
-            if current_tokens >= self.token_budget:
+            if self.token_budget > 0 and current_tokens >= self.token_budget:
                 break
             sqlite_items = self._retrieve_from_sqlite(db_path, entity_matchers, topic_matchers)
             for item in sqlite_items:
                 if item.fact in seen_facts:
                     continue
                 seen_facts.add(item.fact)
-                if current_tokens + item.token_estimate > self.token_budget:
+                if self.token_budget > 0 and current_tokens + item.token_estimate > self.token_budget:
                     break
                 results.append(item)
                 current_tokens += item.token_estimate

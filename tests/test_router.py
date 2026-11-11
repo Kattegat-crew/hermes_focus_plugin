@@ -294,3 +294,30 @@ def test_graph_router_semantic_activation():
     )
     assert winner_with_mem is not None
     assert winner_with_mem.name == "stripe-billing"
+
+
+def test_unconstrained_budget_preserves_full_context(tmp_path):
+    """Verifies that max_context_tokens=0 and memory_token_budget=0 preserve all lines without truncation."""
+    from neural_context.models import MemoryItem, SkillCandidate
+
+    cand = SkillCandidate(name="huge-procedure", path="/fake/huge")
+    # 500 lines of procedure
+    lines = [f"Step {i}: Run extensive command with full parameters and flags" for i in range(500)]
+    skill_content = "\n".join(lines)
+
+    memories = [
+        MemoryItem(entity="Entity1", fact="Fact 1 about architecture", source_file="m.md", token_estimate=10),
+        MemoryItem(entity="Entity2", fact="Fact 2 about database configuration", source_file="m.md", token_estimate=10),
+    ]
+
+    # Default config with 0 (unlimited)
+    config = PluginConfig(max_context_tokens=0, memory_token_budget=0)
+    coord = ContextCoordinator(config=config, sidecar=None)
+
+    block = coord._assemble_context_block(skill=cand, skill_content=skill_content, memories=memories)
+
+    assert block is not None
+    assert "Step 0:" in block
+    assert "Step 499:" in block  # Final step is fully preserved
+    assert "Fact 1 about architecture" in block
+    assert "Fact 2 about database configuration" in block

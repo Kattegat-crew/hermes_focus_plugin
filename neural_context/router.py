@@ -412,23 +412,25 @@ class ContextCoordinator:
             for m in memories:
                 m_line = f"- [{m.entity}] {m.fact}" if m.entity else f"- {m.fact}"
                 m_tok = estimate_tokens(m_line)
-                if mem_tokens + m_tok > self.config.memory_token_budget:
+                if self.config.memory_token_budget > 0 and mem_tokens + m_tok > self.config.memory_token_budget:
                     break
                 mem_lines.append(m_line)
                 mem_tokens += m_tok
 
-        skill_budget = max(100, max_tokens - base_overhead - mem_tokens)
-
         skill_lines = []
         if skill and skill_content:
-            skill_hdr = f"## Active Procedural Guidance (Skill: {skill.name})"
-            skill_cur_tok = estimate_tokens(skill_hdr)
-            for line in skill_content.splitlines():
-                line_tok = estimate_tokens(line)
-                if skill_cur_tok + line_tok > skill_budget:
-                    break
-                skill_lines.append(line)
-                skill_cur_tok += line_tok
+            if max_tokens > 0:
+                skill_budget = max(100, max_tokens - base_overhead - mem_tokens)
+                skill_hdr = f"## Active Procedural Guidance (Skill: {skill.name})"
+                skill_cur_tok = estimate_tokens(skill_hdr)
+                for line in skill_content.splitlines():
+                    line_tok = estimate_tokens(line)
+                    if skill_cur_tok + line_tok > skill_budget:
+                        break
+                    skill_lines.append(line)
+                    skill_cur_tok += line_tok
+            else:
+                skill_lines = skill_content.splitlines()
 
         sections = [header]
         if skill and skill_lines:
@@ -443,13 +445,14 @@ class ContextCoordinator:
         sections.append(footer)
 
         block = "\n".join(sections)
-        # Strict hard ceiling guarantee: trim skill lines until combined block <= max_tokens
-        while estimate_tokens(block) > max_tokens and skill_lines:
-            skill_lines.pop()
-            if skill_lines:
-                sections[2] = "\n".join(skill_lines).strip()
-            else:
-                del sections[1:3]
-            block = "\n".join(sections)
+        # Strict hard ceiling guarantee: trim skill lines until combined block <= max_tokens (only when ceiling > 0)
+        if max_tokens > 0:
+            while estimate_tokens(block) > max_tokens and skill_lines:
+                skill_lines.pop()
+                if skill_lines:
+                    sections[2] = "\n".join(skill_lines).strip()
+                else:
+                    del sections[1:3]
+                block = "\n".join(sections)
 
         return block
