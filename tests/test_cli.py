@@ -58,3 +58,27 @@ def test_cli_status(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "Plugin Enabled" in captured.out
     assert "Skills Indexed" in captured.out
+
+
+def test_cli_config_view_and_set(tmp_path, capsys, monkeypatch):
+    hermes_home = tmp_path / "hermes_home"
+    hermes_home.mkdir()
+    monkeypatch.setattr("neural_context.cli.get_hermes_home", lambda: hermes_home)
+
+    config = PluginConfig(max_context_tokens=0, memory_token_budget=0)
+    args = argparse.Namespace(subcommand="config", set=None)
+    ret = handle_cli(args, config, None, None)
+    assert ret == 0
+    captured = capsys.readouterr()
+    assert "Neural Context Configuration Settings" in captured.out
+    assert "max_context_tokens" in captured.out
+
+    # Test setting a parameter via CLI
+    args_set = argparse.Namespace(subcommand="config", set="max_context_tokens=1500")
+    ret_set = handle_cli(args_set, config, None, None)
+    assert ret_set == 0
+    captured_set = capsys.readouterr()
+    assert "Successfully updated 'max_context_tokens' to 1500" in captured_set.out
+    cfg_file = hermes_home / "config.yaml"
+    assert cfg_file.is_file()
+    assert "max_context_tokens: 1500" in cfg_file.read_text(encoding="utf-8")

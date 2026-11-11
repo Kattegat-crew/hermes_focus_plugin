@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Validation](https://img.shields.io/badge/hermes%20plugins%20validate-15%2F15%20passing-brightgreen.svg)]()
 [![Doctor](https://img.shields.io/badge/hermes%20plugins%20doctor-healthy-brightgreen.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-34%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-35%20passed-brightgreen.svg)]()
 
 > **Cognitive semantic context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
 
@@ -114,6 +114,10 @@ hermes neural-context doctor
 
 # Index local and catalog skills into sidecar SQLite cache
 hermes neural-context index
+
+# View or update plugin settings directly from the terminal
+hermes neural-context config
+hermes neural-context config --set max_context_tokens=1500
 
 # Verify recent turn receipts and routing history
 hermes neural-context verify --limit 20
