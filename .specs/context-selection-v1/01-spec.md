@@ -12,7 +12,7 @@ It intercepts turns prior to model execution at the native `pre_llm_call` hook, 
 The problem hypothesis:
 1. Preloading static skill catalogs into the system prompt wastes 12,000–15,000 tokens per interaction across large catalogs (500+ skills).
 2. Pure on-demand tool calling (`on_demand: true`) burns extra round-trips (~20,000 tokens of re-sent context) because the agent is initially blind to available skills.
-3. Shorthand or ambiguous user prompts (e.g., *"Revisa lo de Lucky"*) fail with naive lexical matching because the technology stack is unmentioned in the prompt. By querying selective memory first for detected entities (*"Lucky"*), domain facts ground the skill router to select the exact procedural skill (*"meta-pixel-capi"*).
+3. Shorthand or ambiguous user prompts (e.g., *"Revisa lo de AcmeCorp"*) fail with naive lexical matching because the technology stack is unmentioned in the prompt. By querying selective memory first for detected entities (*"AcmeCorp"*), domain facts ground the skill router to select the exact procedural skill (*"meta-pixel-capi"*).
 
 ## 2. Actors and operating context
 
@@ -25,7 +25,7 @@ The problem hypothesis:
 
 ### Representative user scenarios
 
-1. **Entity-driven domain task:** A user says *"Revisa lo de Lucky"*. The selector extracts entity `"Lucky"`, queries memory for Lucky's stack (Meta CAPI + FastAPI), enriches the skill search, and injects `meta-pixel-capi` guidance plus Lucky's memory facts in one step.
+1. **Entity-driven domain task:** A user says *"Revisa lo de AcmeCorp"*. The selector extracts entity `"AcmeCorp"`, queries memory for AcmeCorp's stack (Meta CAPI + FastAPI), enriches the skill search, and injects `meta-pixel-capi` guidance plus AcmeCorp's memory facts in one step.
 2. **Multilingual task:** A user asks in Spanish for help fixing a webhook while the relevant procedure is described in English. The selector derives canonical English search intent and retrieves the webhook procedure without translating away the user's prompt.
 3. **Conversational fast exit:** A user greets or acknowledges (*"Hola"*, *"Ok gracias"*). The selector detects non-actionable intent and returns `None` immediately with zero token injection and sub-5ms latency.
 4. **Governance precedence:** In a repository with local `AGENTS.md` and `.skills/`, local project skills take absolute priority over global fleet skills.
@@ -85,7 +85,7 @@ The problem hypothesis:
 
 ### FR-02 — Two-Phase Context-Enriched Routing
 - **Requirement:** When named entities are present, query selective memory first for technical domain ground truth and use retrieved facts to enrich the skill search query.
-- **Acceptance:** A prompt mentioning entity *"Lucky"* retrieves Lucky's tech stack (Meta CAPI + FastAPI) and routes accurately to `meta-pixel-capi`, even when CAPI is not mentioned in the user prompt.
+- **Acceptance:** A prompt mentioning entity *"AcmeCorp"* retrieves AcmeCorp's tech stack (Meta CAPI + FastAPI) and routes accurately to `meta-pixel-capi`, even when CAPI is not mentioned in the user prompt.
 
 ### FR-03 — Single-Step Ingestion
 - **Requirement:** Inline the complete procedural body of the winning `SKILL.md` along with memory facts directly into turn context, eliminating secondary tool-call round trips.

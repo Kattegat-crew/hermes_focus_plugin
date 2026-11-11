@@ -24,12 +24,12 @@
 - **Visual**: In Terminal 1, type a real shorthand ambiguous prompt:
   ```bash
   > hermes
-  User: Revisa lo de Lucky
+  User: Revisa lo de AcmeCorp
   ```
 - **Terminal Action**: Hermes responds immediately with expert procedural advice for Meta Conversions API (CAPI) and FastAPI event deduplication.
 - **Voiceover / Audio**:
-  > *"Watch this prompt: 'Revisa lo de Lucky'. It doesn't mention Meta, CAPI, or Python. But Neural Context intercepts the turn before inference in two phases:*
-  > *Phase 1 extracts the entity 'Lucky' and pulls domain ground truth from selective memory—discovering Lucky is a Meta CAPI lead funnel.*
+  > *"Watch this prompt: 'Revisa lo de AcmeCorp'. It doesn't mention Meta, CAPI, or Python. But Neural Context intercepts the turn before inference in two phases:*
+  > *Phase 1 extracts the entity 'AcmeCorp' and pulls domain ground truth from selective memory—discovering AcmeCorp is an online retail service using Meta CAPI.*
   > *Phase 2 enriches the skill search with those memory facts, instantly ranking the exact winning skill from our sub-5ms SHA-256 sidecar index.*
   > *Both the procedural skill and memory facts are injected into the user turn in a SINGLE step—zero round trips, and the system prompt stays 100% byte-stable for instant KV-cache hits."*
 

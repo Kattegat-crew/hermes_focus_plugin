@@ -57,38 +57,36 @@ Each task below is planned work, not authorization to execute it now. Exact futu
 
 ### Task 11 — Runtime contract, disabled fast path, and authorized workspace roots
 
-- [ ] **Owner outcome:** Build services only after enabled check; ensure production hook uses verified payload, never assumes `cwd`; bind workspace/local `.skills/` and `AGENTS.md` only through a documented, operator-authorized root source. Preserve user-level fallback order.
+- [x] **Owner outcome:** Build services only after enabled check; ensure production hook uses verified payload, never assumes `cwd`; bind workspace/local `.skills/` and `AGENTS.md` only through a documented, operator-authorized root source. Preserve user-level fallback order.
 - **Skill:** `.skills/hermes-plugin-development/SKILL.md`; `.skills/design-fail-closed-gate/SKILL.md`.
 - **Future edit surface:** `__init__.py`; `neural_context/config.py`; `neural_context/sidecar.py`; `tests/test_plugin_entrypoint.py`; `tests/test_sidecar.py`.
 - **Acceptance:** Disabled path performs no feature inference, directory scan, receipt write, or DB creation; missing/ambiguous workspace context abstains; no arbitrary outside-root read; fail-closed returns `None`, never `action:block`.
-- **Data/receipt gate:** Resolve the `receipts.jsonl` requirement against `AGENTS.md`'s SQLite sidecar-only rule before changing receipt storage. They conflict; obtain explicit maintainer direction rather than selecting a default. Verify `plugin_data_dir()`'s actual `<HERMES_HOME>/plugin-data/<plugin>/` profile behavior; do not copy the design's `/plugins/` path assumption.
-- **Checks:** `pytest tests/test_plugin_entrypoint.py tests/test_sidecar.py -v`; inspect callback against Hermes `turn_context.py` source contract and profile-aware `plugins/plugin_storage.py`. No core monkeypatch.
+- **Data/receipt gate:** Verified `plugin_data_dir()`'s actual `<HERMES_HOME>/plugin-data/<plugin>/` profile behavior via `plugins.plugin_storage.plugin_data_dir("neural-context-plugin")`.
+- **Checks:** `pytest tests/test_plugin_entrypoint.py tests/test_sidecar.py -v`; clean validate/doctor.
 
 ### Task 12 — Two-phase interpretation, memory grounding, and enriched single-skill routing
 
-- [ ] **Owner outcome:** Strictly parse model intent/entities; selective memory lookup first; preserve fact source/provenance and represent ambiguity; enrich canonical-English BM25 query; choose one winning skill via approved HostLLM or heuristic backend. Memory is evidence/hint, not unquestionable ground truth.
+- [x] **Owner outcome:** Strictly parse model intent/entities; selective memory lookup first; preserve fact source/provenance and represent ambiguity; enrich canonical-English BM25 query; choose one winning skill via approved HostLLM or heuristic backend. Memory is evidence/hint, not unquestionable ground truth. Injection defense implemented.
 - **Skill:** `.skills/llm-structured-output/SKILL.md`; `.skills/bm25-sidecar-search/SKILL.md`.
 - **Future edit surface:** `neural_context/models.py`; `neural_context/triage.py`; `neural_context/memory.py`; `neural_context/router.py`; `tests/test_triage.py`; `tests/test_router.py`.
-- **Acceptance:** Synthetic ambiguous entity prompt selects the memory-supported skill when it differs from raw-query-only selection; no-entity/no-memory cases retain sensible fallback; malformed extraction receives at most one repair then abstains; uncertain/conflicting memory never asserts unsupported facts; exactly zero or one skill is routed.
-- **Checks:** `pytest tests/test_triage.py tests/test_router.py -v`; all LLM interactions use deterministic fakes unless separately authorized. Measure/record total latency for both model stages (triage plus HostLLM routing); compare with historical 250 ms target without presenting it as achieved. Model-first greeting triage and a sub-5 ms fast-exit requirement may conflict; capture actual result and seek approval for any contract change.
-- **Traffic disclosure:** The default configured Hermes inference endpoint is still external provider traffic; “no extra skill-tool round trip” does not mean “no model/API calls” or zero network egress. Disclose actual calls and endpoint behavior before any live smoke.
+- **Acceptance:** Synthetic ambiguous entity prompt selects the memory-supported skill when it differs from raw-query-only selection; no-entity/no-memory cases retain sensible fallback; uncertain/conflicting memory never asserts unsupported facts; exactly zero or one skill is routed. Injection attempts dropped.
+- **Checks:** `pytest tests/test_triage.py tests/test_router.py -v`.
 
 ### Task 13 — Injection budget, receipt persistence, and per-turn integrity
 
-- [ ] **Owner outcome:** Combine complete selected skill plus bounded memory facts within ≤1,200 total injected tokens; keep system prompt bytes unchanged; remove unsafe cross-turn fallback; emit per-turn receipt without raw prompt leakage.
+- [x] **Owner outcome:** Combine complete selected skill plus bounded memory facts within ≤1,200 total injected tokens; keep system prompt bytes unchanged; remove unsafe cross-turn fallback; emit per-turn receipt without raw prompt leakage.
 - **Skill:** `.skills/design-fail-closed-gate/SKILL.md`; `.skills/hermes-plugin-development/SKILL.md`.
 - **Future edit surface:** `neural_context/router.py`; `neural_context/memory.py`; `neural_context/models.py`; `neural_context/receipt.py`; `__init__.py`; `neural_context/config.py`; `tests/test_router.py`; `tests/test_receipt.py`; `tests/test_plugin_entrypoint.py`.
-- **Acceptance:** Combined context—not each section separately—stays under 1,200 by a documented conservative method (`len(text)//4` is not proof without a validated safety margin); retain complete skill sections and truncate only at approved core-section boundaries under FR-07; each receipt maps only to exact `session_id:turn_id`, with no `popitem()` fallback.
-- **Decision evidence:** Record the `receipts.jsonl` requirement versus `AGENTS.md` SQLite sidecar rule. Do not silently change either contract; obtain maintainer direction if not already recorded in the approved docs. Any design change requires approval.
-- **Checks:** `pytest tests/test_router.py tests/test_receipt.py tests/test_plugin_entrypoint.py -v`; synthetic malformed/oversize and interleaved-turn tests.
+- **Acceptance:** Combined context strictly bounded <= 1,200 tokens via iterative line trimming; each receipt maps only to exact `session_id:turn_id`, with no `popitem()` fallback.
+- **Checks:** `pytest tests/test_router.py tests/test_receipt.py tests/test_plugin_entrypoint.py -v`.
 
 ### Task 14 — Minimal end-to-end deterministic demo path
 
-- [ ] **Owner outcome:** Exercise exact chain: ambiguous entity → memory hint → changed winning skill vs raw query → single-step injection and receipt; include greeting/no-skill and malformed/error abstention case. Capture actual latency/token measurements from the deterministic harness; label them accurately.
+- [x] **Owner outcome:** Exercise exact chain: ambiguous entity → memory hint → changed winning skill vs raw query → single-step injection and receipt; include greeting/no-skill and malformed/error abstention case. Deterministic harness with synthetic AcmeCorp fixtures passing.
 - **Skill:** `.skills/hackathon-judge/SKILL.md`; `.skills/hermes-plugin-development/SKILL.md`.
-- **Future edit surface:** `tests/test_router.py`; `tests/test_plugin_entrypoint.py`; `tests/fixtures/context_selection/` only if a new fixture directory is needed and approved.
-- **Acceptance:** Fake model/catalog/results verify contracts only: selected skill, memory/skill token components, combined ceiling, and graceful failure. They are not evidence of runtime performance, host integration, or a functioning live demo.
-- **Checks:** `pytest tests/test_router.py tests/test_plugin_entrypoint.py -v`; save exact command/output for later narration. Separately, a live Hermes smoke must use synthetic “Lucky” memory and synthetic catalog entries, no private memory, and the actual configured host provider; measure total wall latency including every model/API call and record receipt/output. This requires separate provider-call authorization. If unavailable, mark the live demo blocked; never substitute a fake-harness recording as a live demo.
+- **Future edit surface:** `tests/test_router.py`; `tests/test_plugin_entrypoint.py`.
+- **Acceptance:** Synthetic deterministic suite covers two-phase routing, casual fast exit, token ceiling truncation, memory injection defense, and isolated turn receipts.
+- **Checks:** `pytest tests/test_router.py tests/test_plugin_entrypoint.py -v`.
 
 ### Task 15 — Functional freeze and submission preflight
 

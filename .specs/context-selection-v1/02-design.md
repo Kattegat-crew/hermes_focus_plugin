@@ -34,7 +34,7 @@ Instead of treating skills and memories as isolated silos, it executes a **Two-P
            │                                                         │
            │ Phase 1: Selective Memory Query (Domain Ground Truth)   │
            │  - Queries memory strictly for extracted named entities │
-           │  - Extracts factual hints (e.g. "Lucky uses Meta CAPI") │
+           │  - Extracts factual hints (e.g. "AcmeCorp uses Meta CAPI") │
            │                                                         │
            │ Phase 2: Memory-Enriched Skill Search & Routing         │
            │  - Injects Phase 1 domain hints into skill search query │

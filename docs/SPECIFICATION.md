@@ -54,7 +54,7 @@ An intelligent, pre-inference cognitive context engine registered at the native 
            │                                                         │
            │ Phase 1: Selective Memory Query (Domain Ground Truth)   │
            │  - Queries memory strictly for extracted named entities │
-           │  - Extracts factual hints (e.g. "Lucky uses Meta CAPI") │
+           │  - Extracts factual hints (e.g. "AcmeCorp uses Meta CAPI") │
            │                                                         │
            │ Phase 2: Memory-Enriched Skill Search & Routing         │
            │  - Injects Phase 1 domain hints into skill search query │
@@ -99,13 +99,13 @@ An intelligent, pre-inference cognitive context engine registered at the native 
     "is_actionable_task": true,
     "needs_skills": true,
     "needs_memory": true,
-    "intent_summary_en": "Audit conversion tracking issues and lead drops for Lucky client",
+    "intent_summary_en": "Audit conversion tracking issues and lead drops for AcmeCorp client",
     "search_query": "When the user needs to audit conversion funnels — audit conversion tracking and capi leads",
     "required_capabilities": ["meta-pixel", "conversions-api", "event-deduplication"],
-    "extracted_entities": ["Lucky", "Meta"],
+    "extracted_entities": ["AcmeCorp", "Meta"],
     "is_software_task": false,
     "detected_stack": [],
-    "reasoning": "User noticed a lead drop for Lucky and needs conversion audit procedures and past campaign memory."
+    "reasoning": "User noticed a lead drop for AcmeCorp and needs conversion audit procedures and past campaign memory."
   }
   ```
 - **Intelligent Fast Exit**:
@@ -117,12 +117,12 @@ An intelligent, pre-inference cognitive context engine registered at the native 
 The routing pipeline does not treat memory and skills as isolated independent silos. Instead, memory acts as **domain ground-truth feedback** for skill selection:
 
 1. **Phase 1: Selective Memory Query (Domain Ground Truth)**:
-   - For short or shorthand user prompts (e.g. *"Revisa lo de Lucky"*), the raw prompt contains no mention of the underlying technology stack.
-   - Named entities (`"Lucky"`) are extracted first and queried against memory stores (`MEMORY.md`, `USER.md`, `PROJECT_MEMORY.md`).
-   - Retrieved facts establish domain ground truth (e.g., *"Lucky is a lead funnel landing page using Meta Conversions API (CAPI) and FastAPI backend"*).
+   - For short or shorthand user prompts (e.g. *"Revisa lo de AcmeCorp"*), the raw prompt contains no mention of the underlying technology stack.
+   - Named entities (`"AcmeCorp"`) are extracted first and queried against memory stores (`MEMORY.md`, `USER.md`, `PROJECT_MEMORY.md`).
+   - Retrieved facts establish domain ground truth (e.g., *"AcmeCorp is an online retail platform using Meta Conversions API (CAPI) and FastAPI backend"*).
 2. **Phase 2: Memory-Enriched Skill Search & Routing**:
    - The skill search query is enriched with the technical domain facts uncovered in Phase 1:
-     `enriched_query = f"{search_query} | Domain context: Lucky (Meta Conversions API CAPI, FastAPI)"`
+     `enriched_query = f"{search_query} | Domain context: AcmeCorp (Meta Conversions API CAPI, FastAPI)"`
    - BM25 candidate scoring ranks relevant procedures against the enriched query.
    - The winning skill is selected either via `HostLLMRouter` (using `ctx.llm.complete(messages=[...])` with memory context provided) or `FastHeuristicRouter`.
    - **Local Workspace Sovereignty**: In software repositories with `AGENTS.md` and `.skills/`, local project skills take absolute precedence over global fleet skills.
@@ -136,7 +136,7 @@ The routing pipeline does not treat memory and skills as isolated independent si
   [Complete procedural instructions from SKILL.md without YAML frontmatter]
 
   ## Active Memory Facts (Target Entities)
-  - [Lucky] Lucky is a lead funnel landing page using Meta Conversions API (CAPI) and FastAPI backend.
+  - [AcmeCorp] AcmeCorp is an online retail platform using Meta Conversions API (CAPI) and FastAPI backend.
 
   [Instruction: Use this context as authoritative procedural guidance for this turn.]
   </neural_context>
@@ -206,7 +206,7 @@ Every turn intercepted by the plugin produces a deterministic, verifiable JSON a
   "session_id": "sess-main-01",
   "is_task": true,
   "domain": "software",
-  "entities_detected": ["Lucky"],
+  "entities_detected": ["AcmeCorp"],
   "memory_injected_tokens": 142,
   "selected_skill": "meta-pixel-capi",
   "skill_injected_tokens": 820,

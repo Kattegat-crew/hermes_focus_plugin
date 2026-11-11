@@ -11,24 +11,24 @@ def test_triage_model_cognitive_interpretation():
             "is_actionable_task": True,
             "needs_skills": True,
             "needs_memory": True,
-            "intent_summary_en": "Audit conversion tracking issues and lead drops for Lucky client",
+            "intent_summary_en": "Audit conversion tracking issues and lead drops for AcmeCorp client",
             "search_query": "When the user needs to audit conversion funnels — audit conversion tracking and capi leads",
             "required_capabilities": ["meta-pixel", "conversions-api", "event-deduplication"],
-            "extracted_entities": ["Lucky", "Meta"],
+            "extracted_entities": ["AcmeCorp", "Meta"],
             "is_software_task": False,
             "detected_stack": [],
-            "reasoning": "User noticed a lead drop for Lucky and needs conversion audit procedures and past campaign memory."
+            "reasoning": "User noticed a lead drop for AcmeCorp and needs conversion audit procedures and past campaign memory."
         })
 
     triage = CognitiveTriage(model_fn=mock_model)
     # Ambiguous prompt in Spanish with typos
-    result = triage.analyze("oe chucho mira q se cayeron los leds de la campana de luky en meta revisate eso")
+    result = triage.analyze("mira q se cayeron los leds de la campana de acmecorp en meta revisate eso")
 
     assert result.is_actionable_task is True
     assert result.needs_skills is True
     assert result.needs_memory is True
     assert "conversions-api" in result.required_capabilities
-    assert "Lucky" in result.extracted_entities
+    assert "AcmeCorp" in result.extracted_entities
     assert "When the user needs to" in result.search_query
 
 
@@ -84,8 +84,8 @@ def test_triage_software_task_with_governance_detection():
 def test_triage_offline_grammatical_induction():
     # When no model is provided (e.g. offline fallback), tests grammatical induction
     triage = CognitiveTriage()
-    result = triage.analyze("Escribe un informe de auditoría para el cliente 'Golden Game'")
+    result = triage.analyze("Escribe un informe de auditoría para el cliente 'AcmeCorp'")
 
     assert result.is_actionable_task is True
-    assert "Golden Game" in result.extracted_entities
+    assert "AcmeCorp" in result.extracted_entities
     assert result.needs_skills is True

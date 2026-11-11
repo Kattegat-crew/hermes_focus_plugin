@@ -44,7 +44,7 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
         │                                                         │
         │ Phase 1: Selective Memory Query (Domain Ground Truth)   │
         │  - Queries memory strictly for extracted named entities │
-        │  - Extracts factual hints (e.g. "Lucky uses Meta CAPI") │
+        │  - Extracts factual hints (e.g. "AcmeCorp uses Meta CAPI")│
         │                                                         │
         │ Phase 2: Memory-Enriched Skill Search & Routing         │
         │  - Injects Phase 1 domain hints into skill search query │
@@ -77,7 +77,7 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
 
 ## Key Differentiators
 
-- **Two-Phase Context-Enriched Routing**: Memory facts and skill procedures are not isolated silos. Extracted named entities query memory first to establish domain ground truth (e.g. knowing Lucky uses Meta CAPI with FastAPI), which enriches the skill search to pinpoint the exact winning procedural skill.
+- **Two-Phase Context-Enriched Routing**: Memory facts and skill procedures are not isolated silos. Extracted named entities query memory first to establish domain ground truth (e.g. knowing AcmeCorp uses Meta CAPI with FastAPI), which enriches the skill search to pinpoint the exact winning procedural skill.
 - **Preserves KV-Cache Stability**: Unlike mechanisms that alter the System Prompt, returning ephemeral context from `pre_llm_call` appends to the user turn, keeping the system prompt byte-stable for maximum prompt-cache hits and lowest TTFT.
 - **Single-Step Ingestion**: Unlike existing routers that only emit a tag with the skill name (forcing the agent into a second round-trip costing ~20,000 tokens of re-sent context), Neural Context inlines the winning skill procedure immediately.
 - **Repository Governance Sovereignty**: When working in a software repository with `AGENTS.md` and local `.skills/`, local project rules take absolute precedence over global catalog skills.

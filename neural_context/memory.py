@@ -13,6 +13,12 @@ def estimate_tokens(text: str) -> int:
     return len(text.split()) + len(text) // 4
 
 
+_INJECTION_PATTERNS = re.compile(
+    r"(ignore\s+(all\s+)?previous\s+instructions|<system>|system:|assistant:|human:|<script)",
+    re.IGNORECASE
+)
+
+
 class SelectiveMemoryRetriever:
     """
     Surgical entity-driven memory extractor.
@@ -27,34 +33,37 @@ class SelectiveMemoryRetriever:
         if not entities:
             return []
 
-        search_roots: List[Path] = []
+        clean_entities = [e.strip() for e in entities if len(e.strip()) >= 2]
+        if not clean_entities:
+            return []
+
+        entity_matchers = [(e, re.compile(re.escape(e), re.IGNORECASE)) for e in clean_entities]
+
+        # Standard Hermes candidate memory files (strictly bounded paths)
+        candidate_files: List[Path] = []
         if cwd:
-            search_roots.append(Path(cwd))
+            cwd_p = Path(cwd)
+            if cwd_p.is_dir():
+                for fname in ["PROJECT_MEMORY.md", "MEMORY.md"]:
+                    fp = cwd_p / fname
+                    if fp.is_file():
+                        candidate_files.append(fp)
 
         hermes_home = get_hermes_home()
-        search_roots.extend([
-            hermes_home,
-            hermes_home / "memories",
-            hermes_home / "shared",
-        ])
+        for fname in ["MEMORY.md", "USER.md"]:
+            fp = hermes_home / fname
+            if fp.is_file() and fp not in candidate_files:
+                candidate_files.append(fp)
+
+        memories_dir = hermes_home / "memories"
+        if memories_dir.is_dir():
+            for fp in memories_dir.glob("*.md"):
+                if fp.is_file() and fp not in candidate_files:
+                    candidate_files.append(fp)
 
         results: List[MemoryItem] = []
         current_tokens = 0
         seen_facts = set()
-
-        # Collect candidate markdown memory files
-        candidate_files: List[Path] = []
-        for root in search_roots:
-            if not root.is_dir():
-                continue
-            for fname in ["MEMORY.md", "USER.md", "PROJECT_MEMORY.md"]:
-                fpath = root / fname
-                if fpath.is_file():
-                    candidate_files.append(fpath)
-
-        entity_patterns = [re.compile(re.escape(e), re.IGNORECASE) for e in entities if len(e) >= 3]
-        if not entity_patterns:
-            return []
 
         for fpath in candidate_files:
             if current_tokens >= self.token_budget:
@@ -64,16 +73,17 @@ class SelectiveMemoryRetriever:
             except Exception:
                 continue
 
-            # Split into semantic chunks / bullet points / lines
-            lines = content.splitlines()
-            for line in lines:
+            for line in content.splitlines():
                 trimmed = line.strip()
                 if not trimmed or len(trimmed) < 10 or trimmed.startswith("#"):
                     continue
 
-                for pat in entity_patterns:
+                # Prompt injection defense
+                if _INJECTION_PATTERNS.search(trimmed):
+                    continue
+
+                for ent_name, pat in entity_matchers:
                     if pat.search(trimmed):
-                        # Match found
                         if trimmed in seen_facts:
                             continue
                         seen_facts.add(trimmed)
@@ -81,7 +91,7 @@ class SelectiveMemoryRetriever:
                         if current_tokens + tok > self.token_budget:
                             break
                         results.append(MemoryItem(
-                            entity=pat.pattern,
+                            entity=ent_name,
                             fact=trimmed,
                             source_file=fpath.name,
                             token_estimate=tok

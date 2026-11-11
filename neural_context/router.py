@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from .config import PluginConfig
-from .memory import SelectiveMemoryRetriever
+from .memory import SelectiveMemoryRetriever, estimate_tokens
 from .models import RouteResult, SkillCandidate, TriageAnalysis
 from .sidecar import SidecarIndex
 
@@ -227,7 +227,7 @@ class ContextCoordinator:
         context_block = self._assemble_context_block(selected_skill, skill_content, memories)
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
-        injected_tokens = len(context_block.split()) if context_block else 0
+        injected_tokens = estimate_tokens(context_block) if context_block else 0
         tokens_saved = max(0, 12000 - injected_tokens) if context_block else 12000
 
         return RouteResult(
@@ -250,9 +250,7 @@ class ContextCoordinator:
             parts = raw_content.split("---", 2)
             if len(parts) >= 3:
                 body = parts[2].strip()
-        # Cap at 500 lines to protect budget
-        lines = body.splitlines()[:500]
-        return "\n".join(lines)
+        return body
 
     def _assemble_context_block(
         self,
@@ -263,16 +261,57 @@ class ContextCoordinator:
         if not skill_content and not memories:
             return None
 
-        sections = ["<neural_context>"]
-        if skill and skill_content:
-            sections.append(f"## Active Procedural Guidance (Skill: {skill.name})")
-            sections.append(skill_content.strip())
+        max_tokens = self.config.max_context_tokens
+        header = "<neural_context>"
+        instruction = "[Instruction: Use this context as authoritative procedural guidance for this turn.]"
+        footer = "</neural_context>"
 
+        base_overhead = estimate_tokens(f"{header}\n{instruction}\n{footer}\n")
+
+        mem_lines = []
+        mem_tokens = 0
         if memories:
-            sections.append("\n## Active Memory Facts (Target Entities)")
+            mem_hdr = "## Active Memory Facts (Target Entities)"
+            mem_tokens += estimate_tokens(mem_hdr)
             for m in memories:
-                sections.append(f"- [{m.entity}] {m.fact}")
+                m_line = f"- [{m.entity}] {m.fact}"
+                m_tok = estimate_tokens(m_line)
+                if mem_tokens + m_tok > self.config.memory_token_budget:
+                    break
+                mem_lines.append(m_line)
+                mem_tokens += m_tok
 
-        sections.append("\n[Instruction: Use this context as authoritative procedural guidance for this turn.]")
-        sections.append("</neural_context>")
-        return "\n".join(sections)
+        skill_budget = max(100, max_tokens - base_overhead - mem_tokens)
+
+        skill_lines = []
+        if skill and skill_content:
+            skill_hdr = f"## Active Procedural Guidance (Skill: {skill.name})"
+            skill_cur_tok = estimate_tokens(skill_hdr)
+            for line in skill_content.splitlines():
+                line_tok = estimate_tokens(line)
+                if skill_cur_tok + line_tok > skill_budget:
+                    break
+                skill_lines.append(line)
+                skill_cur_tok += line_tok
+
+        sections = [header]
+        if skill and skill_lines:
+            sections.append(f"## Active Procedural Guidance (Skill: {skill.name})")
+            sections.append("\n".join(skill_lines).strip())
+        if mem_lines:
+            sections.append("\n## Active Memory Facts (Target Entities)")
+            sections.extend(mem_lines)
+        sections.append(f"\n{instruction}")
+        sections.append(footer)
+
+        block = "\n".join(sections)
+        # Strict hard ceiling guarantee: trim skill lines until combined block <= max_tokens
+        while estimate_tokens(block) > max_tokens and skill_lines:
+            skill_lines.pop()
+            if skill_lines:
+                sections[2] = "\n".join(skill_lines).strip()
+            else:
+                del sections[1:3]
+            block = "\n".join(sections)
+
+        return block

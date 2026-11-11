@@ -16,6 +16,18 @@ def get_hermes_home() -> Path:
         return Path(env) if env else (Path.home() / ".hermes")
 
 
+def get_plugin_data_dir() -> Path:
+    """Resolve the canonical Hermes plugin data directory: <hermes_home>/plugin-data/<name>/."""
+    try:
+        from plugins.plugin_storage import plugin_data_dir
+        return plugin_data_dir("neural-context-plugin")
+    except Exception:
+        home = get_hermes_home()
+        d = home / "plugin-data" / "neural-context-plugin"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+
 class PluginConfig(BaseModel):
     enabled: bool = True
     pre_hook_enabled: bool = True
@@ -60,9 +72,7 @@ class PluginConfig(BaseModel):
         if jev_key:
             config_data["jev_api_key"] = jev_key
 
-        home = get_hermes_home()
-        data_dir = home / "plugins" / "neural-context-plugin"
-        data_dir.mkdir(parents=True, exist_ok=True)
+        data_dir = get_plugin_data_dir()
 
         if not config_data.get("sidecar_db_path"):
             config_data["sidecar_db_path"] = str(data_dir / "sidecar_index.db")

@@ -70,3 +70,25 @@ def test_session_isolated_hooks(tmp_path):
         turn_id="turn_1"
     )
     assert key1 not in plugin_entry._session_turns
+
+
+def test_plugin_disabled_fast_path(tmp_path):
+    import __init__ as plugin_entry
+
+    mock_ctx = MagicMock()
+    mock_ctx.cwd = str(tmp_path)
+    # Simulate config where plugin is disabled
+    mock_ctx.get_config.side_effect = lambda key, default=None: False if key == "enabled" else default
+
+    # Reset any cached config
+    plugin_entry._config = None
+
+    res = plugin_entry.on_pre_llm_call(
+        user_message="Need to run complex audit",
+        _ctx=mock_ctx,
+        session_id="session_disabled",
+        turn_id="turn_disabled"
+    )
+    # Must immediately return None without creating turn state
+    assert res is None
+    assert "session_disabled:turn_disabled" not in plugin_entry._session_turns

@@ -69,11 +69,12 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
     Appends ephemeral context to the USER message turn.
     Returns None if nothing fits or on any error (fail-closed).
     """
-    global _session_turns
+    global _session_turns, _config
     ctx = kwargs.get("_ctx")
-    config, sidecar, triage, coordinator, _ = _get_services(ctx)
+    if _config is None:
+        _config = PluginConfig.load_from_ctx(ctx)
 
-    if not config.enabled or not config.pre_hook_enabled:
+    if not _config.enabled or not _config.pre_hook_enabled:
         return None
 
     text = str(user_message or "").strip()
@@ -85,6 +86,7 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
     turn_key = f"{session_id}:{turn_id}"
 
     try:
+        config, sidecar, triage, coordinator, _ = _get_services(ctx)
         cwd = kwargs.get("cwd") or getattr(ctx, "cwd", None)
         analysis = triage.analyze(text, cwd=cwd)
         result = coordinator.execute(analysis, user_message=text, cwd=cwd)
@@ -110,12 +112,12 @@ def on_post_llm_call(response: Any = None, **kwargs: Any) -> None:
     session_id = str(kwargs.get("session_id", ""))
     turn_key = f"{session_id}:{turn_id}"
 
-    # Retrieve and clean up turn state
-    analysis, route_result = _session_turns.pop(turn_key, (None, None))
-    if analysis is None and _session_turns:
-        # Fallback to most recent entry if turn_id was unassigned
-        _, (analysis, route_result) = _session_turns.popitem()
+    # Retrieve and clean up turn state for this exact turn (no unsafe cross-turn fallback)
+    turn_data = _session_turns.pop(turn_key, None)
+    if turn_data is None:
+        return
 
+    analysis, route_result = turn_data
     if analysis is None or route_result is None:
         return
 
@@ -135,10 +137,8 @@ def on_post_llm_call(response: Any = None, **kwargs: Any) -> None:
 def register(ctx: Any) -> None:
     """
     Wires hooks, CLI commands, and inspection tools into Hermes Agent runtime.
-    Guaranteed fail-safe execution.
+    Guaranteed fail-safe execution and strictly lazy initialization.
     """
-    config, sidecar, _, _, receipt_emitter = _get_services(ctx)
-
     # 1. Register pre_llm_call hook
     def pre_hook_handler(**kwargs: Any) -> Optional[Dict[str, str]]:
         kwargs["_ctx"] = ctx
@@ -156,10 +156,11 @@ def register(ctx: Any) -> None:
     # 3. Register inspection tools
     if hasattr(ctx, "register_tool"):
         def neural_context_status_tool(args: dict, **kw: Any) -> str:
+            cfg, sidecar, _, _, receipt_emitter = _get_services(ctx)
             stats = receipt_emitter.get_summary_stats()
             return (
                 f"Neural Context Engine Active | Indexed Skills: {sidecar.n_docs} | "
-                f"Backend: {config.router_backend} | Total Saved Tokens: {stats.get('total_tokens_saved', 0)}"
+                f"Backend: {cfg.router_backend} | Total Saved Tokens: {stats.get('total_tokens_saved', 0)}"
             )
 
         status_schema = {
@@ -212,7 +213,8 @@ def register(ctx: Any) -> None:
             register_cli(cmd_parser)
 
         def cli_handler_fn(args: Any) -> int:
-            return handle_cli(args, config, sidecar, receipt_emitter)
+            cfg, sidecar, _, _, receipt_emitter = _get_services(ctx)
+            return handle_cli(args, cfg, sidecar, receipt_emitter)
 
         ctx.register_cli_command(
             name="neural-context",
