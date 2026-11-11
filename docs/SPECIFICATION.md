@@ -22,7 +22,7 @@ Preload all skills & full memory                                  on_demand: tru
 ### The Root Problems
 1. **Catalog Bloat**: As users install specialized skills over time (from dozens to hundreds of skills), injecting the static skill catalog (`name + description`) into the System Prompt adds ~25–30 tokens per skill on **every single turn**. For a catalog of 500 skills, this wastes ~12,000–15,000 tokens per interaction.
 2. **Memory Overload**: Unfiltered memory dumps inject irrelevant historical facts from unrelated projects, muddying reasoning context and driving up token expenditure.
-3. **The Failure of Naive Lexical Matching**: Real-world user queries are frequently ambiguous, conversational, or written in another language (e.g., Spanish prompts against an English catalog). Users describe the **problem or business goal**, not the skill name. Simple keyword search or flat BM25 on the raw prompt fails in nearly 100% of ambiguous cases.
+3. **The Limitation of Naive Lexical Matching**: Real-world user queries are frequently ambiguous, conversational, or written in another language (e.g., Spanish prompts against an English catalog). Users describe the **problem or business goal**, not the skill name. Simple keyword search or flat BM25 on the raw prompt often fails when user queries omit canonical skill terminology or span multi-domain goals.
 
 ### The Solution: `neural-context-plugin`
 An intelligent, pre-inference cognitive context engine registered at the native `pre_llm_call` hook. It interprets the true technical intent of the user, executes a **Two-Phase Context-Enriched Routing Pipeline** (where selective memory facts provide ground-truth domain hints to guide procedural skill selection), queries a lightweight SHA256-hashed sidecar index, loads the winning skill in a single step, and injects ephemeral context into the user turn—**preserving KV-cache stability while eliminating redundant round-trips**.
@@ -68,7 +68,8 @@ An intelligent, pre-inference cognitive context engine registered at the native 
            │        STEP 3: SINGLE-STEP SKILL & MEMORY INGESTION     │
            │  - Ingest winning SKILL.md body immediately             │
            │  - Combine procedural skill with active memory facts    │
-           │  - Enforce shared token budget (≤ 1,200 tokens total)   │
+           │  - Preserve full procedural depth (unlimited by default)│
+           │  - Optional configurable ceilings for smaller models    │
            └────────────────────────────┬────────────────────────────┘
                                         │
                                         ▼
@@ -141,7 +142,7 @@ The routing pipeline does not treat memory and skills as isolated independent si
   [Instruction: Use this context as authoritative procedural guidance for this turn.]
   </neural_context>
   ```
-- **Adaptive Token Optimization**: Injected context is dynamically optimized to minimize token consumption per turn without arbitrarily chopping complex technical workflows. Default ceiling (`max_context_tokens`) is configurable (default: 2,500 tokens), with graceful line pruning at step boundaries if necessary.
+- **Configurable Token Controls**: Injected context preserves 100% of procedural steps and matching facts by default (default: 0 = unconstrained). Users can optionally enforce strict ceilings (`max_context_tokens`, `memory_token_budget`) with graceful line pruning at step boundaries if operating under context-constrained models.
 
 ### Step 4: Ephemeral Assembly & KV-Cache Stability
 - **KV-Cache Contract**: In modern LLM inference (Claude, OpenAI, vLLM, DeepSeek), altering the System Prompt invalidates prompt caching across the entire session, destroying cache-hit rates and increasing TTFT.
