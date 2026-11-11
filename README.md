@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Validation](https://img.shields.io/badge/hermes%20plugins%20validate-15%2F15%20passing-brightgreen.svg)]()
 [![Doctor](https://img.shields.io/badge/hermes%20plugins%20doctor-healthy-brightgreen.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-43%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-45%20passed-brightgreen.svg)]()
 
 > **Cognitive context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
 
@@ -85,7 +85,7 @@ In production LLM agent environments, context provisioning faces compound scalin
 
 ## Key Differentiators
 
-- **Cognitive Arbiter (4 Quadrants)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`. Casual conversational turns exit with 0 tokens injected; in graph mode execution is sub-millisecond ($<5\text{ ms}$), and in host model mode intent classification runs directly on the active model with zero external network round-trips.
+- **Cognitive Arbiter (4 Quadrants)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`. Casual conversational turns exit immediately with 0 tokens injected. In local graph mode execution takes $<5\text{ ms}$; in host LLM mode intent classification executes via the active model provider (3–8s for reasoning models with thought tokens; 200–500ms for lightweight models) with zero intermediate third-party routing proxies.
 - **Universal Memory Adaptability**: Works out of the box with standard vanilla Hermes Markdown (`MEMORY.md`, `USER.md`, `PROJECT_MEMORY.md`, `memories/**/*.md`), supports custom directory configurations (`HERMES_MEMORY_DIR`), and provides read-only probing for SQLite stores (`memories.db`, `state.db`) without locking or schema dependencies.
 - **Preserves Full Context by Default**: Does not enforce artificial token ceilings by default (`0` = unlimited). Procedural depth and domain facts are fully preserved, with optional user-configurable budgets for smaller models.
 - **Zero KV-Cache Mutation**: Injects context exclusively into the ephemeral user message turn. The System Prompt remains byte-stable, maximizing prompt cache hits and minimizing latency.
@@ -157,7 +157,7 @@ plugins:
 ## Verification & Tests
 
 ```bash
-# Run pytest test suite (43 passing tests)
+# Run pytest test suite (45 passing tests)
 pytest -v
 
 # Run official Hermes Plugin validation (15/15 checks passed)

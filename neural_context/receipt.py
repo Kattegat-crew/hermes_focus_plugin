@@ -32,6 +32,10 @@ class ReceiptEmitter:
         if hasattr(route_val, "value"):
             route_val = route_val.value
 
+        is_truncated = getattr(analysis, "truncation_detected", False) or (getattr(route_result, "status", "") == "error_truncated")
+        status_val = "error_truncated" if is_truncated else (route_result.status if not error else "error")
+        error_val = error or ("Model response truncated by token limit" if is_truncated else None)
+
         record = ReceiptRecord(
             turn_id=turn_id,
             session_id=session_id,
@@ -49,8 +53,8 @@ class ReceiptEmitter:
             router_backend=route_result.router_backend,
             triage_latency_ms=route_result.triage_latency_ms,
             tokens_saved_estimate=route_result.tokens_saved_estimate,
-            status=route_result.status if not error else "error",
-            error=error
+            status=status_val,
+            error=error_val
         )
 
         try:

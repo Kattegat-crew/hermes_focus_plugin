@@ -113,6 +113,18 @@ def inspect_workspace_governance(cwd: Optional[str] = None) -> DomainClassificat
     )
 
 
+def _is_truncated_completion(text: Optional[str]) -> bool:
+    """Returns True if model completion was truncated (empty string or unclosed JSON)."""
+    if text is None:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if "{" in stripped and "}" not in stripped:
+        return True
+    return False
+
+
 class CognitiveTriage:
     """
     Cognitive Semantic Interpreter.
@@ -120,7 +132,7 @@ class CognitiveTriage:
     Synthesizes dual-form queries and capability nouns to maximize skill retrieval accuracy.
     """
 
-    def __init__(self, ctx: Any = None, model_fn: Optional[Callable[[str], str]] = None, max_tokens: int = 1500):
+    def __init__(self, ctx: Any = None, model_fn: Optional[Callable[[str], str]] = None, max_tokens: int = 3000):
         self.ctx = ctx
         self.model_fn = model_fn
         self.max_tokens = max_tokens
@@ -130,13 +142,13 @@ class CognitiveTriage:
         domain_info = inspect_workspace_governance(cwd)
 
         # 1. Execute cognitive interpretation via model
-        llm_output = self._call_model(clean_text)
+        llm_output, is_truncated = self._call_model(clean_text)
 
         # 2. Parse and validate structured output
-        analysis = self._parse_structured_output(llm_output, clean_text, domain_info)
+        analysis = self._parse_structured_output(llm_output, clean_text, domain_info, is_truncated=is_truncated)
         return analysis
 
-    def _call_model(self, user_text: str) -> Optional[str]:
+    def _call_model(self, user_text: str) -> tuple[Optional[str], bool]:
         """Invokes the model facade (ctx.llm, custom model_fn, or structured prompt)."""
         hermes_locale = get_hermes_language()
         locale_directive = f"\n[Hermes Configured Locale: {hermes_locale}]\n" if hermes_locale else ""
@@ -145,7 +157,9 @@ class CognitiveTriage:
         # Case A: Custom model callable injected (useful for tests or dedicated local LLM)
         if self.model_fn is not None:
             try:
-                return self.model_fn(prompt)
+                out = self.model_fn(prompt)
+                truncated = _is_truncated_completion(out)
+                return out, truncated
             except Exception:
                 pass
 
@@ -153,28 +167,44 @@ class CognitiveTriage:
         if self.ctx is not None and hasattr(self.ctx, "llm") and self.ctx.llm is not None:
             try:
                 # Hermes Agent PluginLlm.complete expects messages: list[dict[str, Any]]
-                # Use budget of 1500 tokens to ensure reasoning models (e.g. DeepSeek, o1, Qwen thinking)
+                # Default budget of 3000 tokens ensures reasoning models (e.g. DeepSeek, o1, Qwen thinking)
                 # have sufficient headroom for thought tokens before emitting structured JSON.
                 resp = self.ctx.llm.complete(
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.max_tokens,
                     temperature=0.0
                 )
-                if hasattr(resp, "text") and isinstance(resp.text, str):
-                    return resp.text
-                elif isinstance(resp, str):
-                    return resp
-                return None
+                text = resp.text if hasattr(resp, "text") and isinstance(resp.text, str) else (resp if isinstance(resp, str) else None)
+
+                # Check for truncation (finish_reason=length with empty content or cut-off JSON)
+                if _is_truncated_completion(text):
+                    # Single adaptive retry with doubled budget (capped at 6000 tokens)
+                    try:
+                        retry_budget = min(self.max_tokens * 2, 6000)
+                        retry_resp = self.ctx.llm.complete(
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=retry_budget,
+                            temperature=0.0
+                        )
+                        retry_text = retry_resp.text if hasattr(retry_resp, "text") and isinstance(retry_resp.text, str) else (retry_resp if isinstance(retry_resp, str) else None)
+                        if not _is_truncated_completion(retry_text):
+                            return retry_text, False
+                        return retry_text, True
+                    except Exception:
+                        return text, True
+
+                return text, False
             except Exception:
                 pass
 
-        return None
+        return None, False
 
     def _parse_structured_output(
         self,
         raw_output: Optional[str],
         original_text: str,
-        domain_info: DomainClassification
+        domain_info: DomainClassification,
+        is_truncated: bool = False
     ) -> TriageAnalysis:
         """
         Parses and self-heals structured JSON from the model response.
@@ -271,6 +301,8 @@ class CognitiveTriage:
                         extracted_entities=entities,
                         domain=domain_info,
                         reasoning=reasoning or f"Classified as {route.value} by cognitive arbiter.",
+                        truncation_detected=is_truncated,
+                        error="error_truncated" if is_truncated else None,
                         confidence=0.95
                     )
                 except Exception:
@@ -278,7 +310,12 @@ class CognitiveTriage:
 
         # Offline / zero-model grammatical induction fallback:
         # Evaluates sentence structure, clause predicates, and communicative purpose
-        return self._grammatical_intent_induction(original_text, domain_info)
+        analysis = self._grammatical_intent_induction(original_text, domain_info)
+        if is_truncated:
+            analysis.truncation_detected = True
+            analysis.error = "error_truncated"
+            analysis.reasoning = f"Model output truncated by max_tokens limit ({self.max_tokens} tokens) before structured JSON completed; applied grammatical fallback."
+        return analysis
 
     def _grammatical_intent_induction(
         self,

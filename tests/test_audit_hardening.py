@@ -146,7 +146,7 @@ def test_multi_tier_skill_discovery(tmp_path: Path):
 
 
 def test_triage_uses_sufficient_max_tokens_budget_for_reasoning_models():
-    """Ensure host LLM complete() receives max_tokens >= 1200 to prevent reasoning token truncation."""
+    """Ensure host LLM complete() receives max_tokens >= 2500 to prevent reasoning token truncation."""
     mock_llm = MagicMock()
     mock_llm.complete.return_value = '{"route": "DIRECT_REPLY", "reasoning": "greeting"}'
 
@@ -158,8 +158,89 @@ def test_triage_uses_sufficient_max_tokens_budget_for_reasoning_models():
 
     assert mock_llm.complete.called
     kwargs = mock_llm.complete.call_args[1]
-    assert kwargs.get("max_tokens", 0) >= 1200
-    assert kwargs.get("max_tokens") == 1500
+    assert kwargs.get("max_tokens", 0) >= 2500
+    assert kwargs.get("max_tokens") == 3000
+
+
+def test_triage_truncation_detection_and_degradation_receipt(tmp_path):
+    """Verifies that truncation in reasoning models triggers retry, explicit degradation, and error receipt."""
+    from neural_context.models import RouteResult
+    from neural_context.receipt import ReceiptEmitter
+    from neural_context.router import ContextCoordinator
+    from neural_context.sidecar import SidecarIndex
+    from neural_context.config import PluginConfig
+
+    # Simulate a reasoning model exhausting tokens on internal CoT: returns empty content
+    mock_llm = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = ""
+    mock_llm.complete.return_value = mock_resp
+
+    mock_ctx = MagicMock()
+    mock_ctx.llm = mock_llm
+
+    triage = CognitiveTriage(ctx=mock_ctx, max_tokens=3000)
+    analysis = triage.analyze("Implementa el pixel CAPI de Meta para AcmeCorp")
+
+    # Verify adaptive retry occurred with doubled budget
+    assert mock_llm.complete.call_count == 2
+    retry_kwargs = mock_llm.complete.call_args_list[1][1]
+    assert retry_kwargs["max_tokens"] == 6000
+
+    # Verify explicit truncation detection on analysis
+    assert analysis.truncation_detected is True
+    assert analysis.error == "error_truncated"
+
+    # Verify coordinator emits degraded status
+    db_file = tmp_path / "sidecar.db"
+    index = SidecarIndex(db_path=str(db_file))
+    config = PluginConfig(sidecar_db_path=str(db_file), router_backend="heuristic")
+    coordinator = ContextCoordinator(config=config, sidecar=index)
+
+    result = coordinator.execute(analysis, user_message="Implementa el pixel CAPI de Meta para AcmeCorp")
+    assert result.status == "error_truncated"
+
+    # Verify receipt record explicitly logs error_truncated instead of silent fake green
+    receipts_file = tmp_path / "receipts.jsonl"
+    emitter = ReceiptEmitter(receipts_path=str(receiptss := str(receipts_file)))
+    rec = emitter.record_turn(
+        turn_id="turn_trunc_1",
+        session_id="sess_1",
+        analysis=analysis,
+        route_result=result,
+        platform="cli",
+        model="deepseek-v4-flash"
+    )
+    assert rec.status == "error_truncated"
+    assert "truncated" in rec.error.lower()
+
+
+def test_host_llm_router_uses_sufficient_token_budget():
+    """Ensure HostLLMRouter allocates max_tokens >= 1000 so reasoning models have thought headroom."""
+    from neural_context.router import HostLLMRouter
+    from neural_context.models import SkillCandidate, TriageAnalysis
+
+    mock_ctx = MagicMock()
+    mock_res = MagicMock()
+    mock_res.text = "meta-pixel-capi"
+    mock_ctx.llm.complete.return_value = mock_res
+
+    router = HostLLMRouter(ctx=mock_ctx)
+    analysis = TriageAnalysis(
+        is_actionable_task=True,
+        intent_summary_en="Setup Meta CAPI tracking",
+        required_capabilities=["capi"]
+    )
+    candidates = [
+        (SkillCandidate(name="meta-pixel-capi", description="Meta CAPI", lead_paragraph="", path="/tmp/1", source_type="global"), 0.9),
+        (SkillCandidate(name="general-python", description="General Python", lead_paragraph="", path="/tmp/2", source_type="global"), 0.4),
+    ]
+
+    selected = router.route(analysis, candidates)
+    assert selected is not None
+    assert mock_ctx.llm.complete.called
+    kwargs = mock_ctx.llm.complete.call_args.kwargs
+    assert kwargs.get("max_tokens", 0) >= 1000
 
 
 def test_enriched_task_routing_with_named_entity():

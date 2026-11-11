@@ -157,6 +157,14 @@ class TriageAnalysis(BaseModel):
         default="",
         description="Brief cognitive explanation for the intent and triage decision."
     )
+    truncation_detected: bool = Field(
+        default=False,
+        description="True if model response was truncated due to max_tokens limit exhaustion."
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error details if cognitive interpretation failed or degraded."
+    )
     confidence: float = Field(
         default=1.0,
         ge=0.0,

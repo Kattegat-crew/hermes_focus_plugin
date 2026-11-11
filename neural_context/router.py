@@ -192,9 +192,11 @@ class HostLLMRouter(SkillRouterBackend):
 
         try:
             # Hermes Agent PluginLlm.complete expects messages: list[dict[str, Any]]
+            # Use max_tokens=1000 to ensure reasoning models have headroom for thought tokens
+            # before emitting the single selected skill name.
             resp = self.ctx.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=20,
+                max_tokens=1000,
                 temperature=0.0
             )
             choice = (resp.text if hasattr(resp, "text") else str(resp)).strip()
@@ -362,6 +364,10 @@ class ContextCoordinator:
             baseline = max(catalog_count * 350, injected_tokens + 500) if catalog_count > 0 else injected_tokens + 500
             tokens_saved = max(0, baseline - injected_tokens)
 
+        is_truncated = getattr(analysis, "truncation_detected", False)
+        status_val = "error_truncated" if is_truncated else ("success" if context_block else "no_context_injected")
+        msg_val = "Model triage output truncated by token limit; degraded to fallback intent." if is_truncated else analysis.reasoning
+
         return RouteResult(
             selected_skill=selected_skill,
             injected_skill_content=skill_content,
@@ -372,8 +378,8 @@ class ContextCoordinator:
             tokens_saved_estimate=tokens_saved,
             triage_latency_ms=elapsed_ms,
             router_backend=self.config.router_backend,
-            status="success" if context_block else "no_context_injected",
-            message=analysis.reasoning
+            status=status_val,
+            message=msg_val
         )
 
     def _format_skill_for_injection(self, name: str, raw_content: str) -> str:
