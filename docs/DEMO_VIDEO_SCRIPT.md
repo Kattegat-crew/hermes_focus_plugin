@@ -77,12 +77,12 @@
   hermes plugins doctor .
   ```
 - Highlight:
-  - **35/35 unit tests passing**
+  - **41/41 unit tests passing**
   - **15/15 Hermes plugin validation checks green**
   - Preserves full context by default (`0 = unconstrained`), with customizable ceilings.
 
 ### Audio / Voiceover
-> *"Universal adaptability across standard Hermes Markdown and SQLite stores, 35 unit tests passing, and 100% compliant with official Hermes plugin standards.*
+> *"Universal adaptability across standard Hermes Markdown and SQLite stores, 41 unit tests passing, and 100% compliant with official Hermes plugin standards.*
 > 
 > *Give your agent surgical context. Install it today with `hermes plugins install Kattegat-crew/hermes_focus_plugin`."*
 
@@ -122,7 +122,7 @@
 > *Al mantener el System Prompt completamente inmutable, se aprovecha al máximo el caché del modelo, reduciendo notablemente los tiempos de espera y recortando de forma sustancial el consumo de tokens, sin recortar jamás la profundidad técnica que necesitas."*
 
 ### Escena 4: Adaptabilidad Universal y Cierre (01:08 - 01:25)
-> *"Adaptable tanto al estándar de Markdown de Hermes como a almacenes SQLite, con 35 pruebas unitarias verificadas y validación oficial aprobada al 100%.*
+> *"Adaptable tanto al estándar de Markdown de Hermes como a almacenes SQLite, con 41 pruebas unitarias verificadas y validación oficial aprobada al 100%.*
 > 
 > *Dale a tu agente contexto quirúrgico. Instálalo hoy con `hermes plugins install Kattegat-crew/hermes_focus_plugin`."*
 
@@ -145,7 +145,7 @@ Focus intercepts turns before inference:
 ✅ Universal Adaptability: Works seamlessly with vanilla Hermes Markdown & SQLite stores
 ✅ Preserves 100% of procedural depth with zero arbitrary truncation
 
-15/15 Hermes plugin validation checks passed. 35/35 unit tests green.
+15/15 Hermes plugin validation checks passed. 41/41 unit tests green.
 
 Install now:
 hermes plugins install Kattegat-crew/hermes_focus_plugin

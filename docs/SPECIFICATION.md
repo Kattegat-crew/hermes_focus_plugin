@@ -239,7 +239,7 @@ Every turn intercepted by the plugin produces a deterministic, verifiable JSON a
 - [x] Dedicated Git Repository: [`/opt/hermes_focus_plugin`](file:///opt/hermes_focus_plugin) (`git@github.com:Kattegat-crew/hermes_focus_plugin.git`).
 - [x] Core Python Package: `neural_context` (`sidecar.py`, `triage.py`, `router.py`, `memory.py`, `receipt.py`, `cli.py`, `config.py`, `models.py`).
 - [x] Hermes Plugin Wrapper: `plugin.yaml`, `__init__.py` (registers `pre_llm_call`, `post_llm_call`, `focus` CLI, and `focus_status` / `focus_route` tools).
-- [x] Pytest Suite: 35 deterministic unit tests (100% passing) covering cognitive triage, 4-quadrant routing, universal memory adaptability (Markdown & SQLite), sidecar BM25, and CLI diagnostics (including interactive config).
+- [x] Pytest Suite: 41 deterministic unit tests (100% passing) covering cognitive triage, 4-quadrant routing, universal memory adaptability (Markdown & SQLite), sidecar BM25, and CLI diagnostics (including interactive config).
 - [x] Hermes Plugin Validation: Passed `hermes plugins validate` (15/15 checks ok, 0 errors, 0 warnings).
 - [x] Hermes Plugin Doctor: Passed `hermes plugins doctor` (100% green, 2 tools, 2 hooks registered).
 - [x] Universal Memory Adaptability: Full support for vanilla Hermes Markdown (`MEMORY.md`, `USER.md`, `memories/**/*.md`), custom directories (`HERMES_MEMORY_DIR`), and pluggable SQLite stores (`memories.db`), with strict boundary protection.

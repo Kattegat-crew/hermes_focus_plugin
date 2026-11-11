@@ -147,6 +147,7 @@ class SidecarIndex:
                         is_project_local=excluded.is_project_local,
                         indexed_tokens=excluded.indexed_tokens,
                         last_updated=CURRENT_TIMESTAMP
+                    WHERE excluded.is_project_local >= skills_sidecar.is_project_local
                 """, (skill_name, str(p.resolve()), sha, desc, lead, is_local, tokens))
                 updated_count += 1
 

@@ -28,6 +28,13 @@ _FORBIDDEN_PREFIXES = (
     Path("/root/.ssh"),
 )
 
+_GRAMMATICAL_STOPWORDS = {
+    "del", "las", "los", "con", "por", "para", "que", "una", "uno", "este", "esta", "estos", "estas",
+    "como", "pero", "sobre", "entre", "hacia", "desde", "hasta",
+    "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "been", "have", "has",
+    "had", "not", "but", "about", "into", "over", "after"
+}
+
 
 def is_safe_memory_file(path: Path) -> bool:
     """Validate path safety against symlink traversal and denial of service."""
@@ -74,7 +81,7 @@ class SelectiveMemoryRetriever:
         if probe and probe.entity and probe.entity.strip() not in clean_entities:
             clean_entities.append(probe.entity.strip())
 
-        # Collect multilingual topic keywords from probe
+        # Collect topic keywords from probe excluding grammatical function words
         topic_terms: List[str] = []
         if probe:
             for text_source in [probe.topic, probe.query_text]:
@@ -82,7 +89,7 @@ class SelectiveMemoryRetriever:
                     tokens = re.findall(r"[\w]{3,}", text_source, re.UNICODE)
                     for tok in tokens:
                         t_low = tok.lower()
-                        if t_low not in topic_terms and len(t_low) >= 3:
+                        if t_low not in topic_terms and len(t_low) >= 3 and t_low not in _GRAMMATICAL_STOPWORDS:
                             topic_terms.append(t_low)
 
         if not clean_entities and not topic_terms:
@@ -186,7 +193,8 @@ class SelectiveMemoryRetriever:
 
                 if not matched_entity and topic_matchers:
                     matches = sum(1 for pat in topic_matchers if pat.search(trimmed))
-                    if matches > 0:
+                    min_required = min(2, len(topic_matchers))
+                    if matches >= min_required:
                         matched_entity = (probe.topic if probe and probe.topic else "Context")
 
                 if matched_entity:
@@ -210,7 +218,7 @@ class SelectiveMemoryRetriever:
         for db_path in sqlite_candidates:
             if self.token_budget > 0 and current_tokens >= self.token_budget:
                 break
-            sqlite_items = self._retrieve_from_sqlite(db_path, entity_matchers, topic_matchers)
+            sqlite_items = self._retrieve_from_sqlite(db_path, entity_matchers, topic_matchers, topic_terms)
             for item in sqlite_items:
                 if item.fact in seen_facts:
                     continue
@@ -226,7 +234,8 @@ class SelectiveMemoryRetriever:
         self,
         db_path: Path,
         entity_matchers: List,
-        topic_matchers: List
+        topic_matchers: List,
+        topic_terms: Optional[List[str]] = None
     ) -> List[MemoryItem]:
         """
         Safely inspects a candidate SQLite database in read-only mode.
@@ -256,9 +265,10 @@ class SelectiveMemoryRetriever:
                     return []
 
                 for ent_name, _ in entity_matchers:
+                    safe_ent = ent_name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                     cursor.execute(
-                        f"SELECT {text_col} FROM {target_table} WHERE {text_col} LIKE ? LIMIT 5",
-                        (f"%{ent_name}%",)
+                        f"SELECT {text_col} FROM {target_table} WHERE {text_col} LIKE ? ESCAPE '\\' LIMIT 5",
+                        (f"%{safe_ent}%",)
                     )
                     for row in cursor.fetchall():
                         val = str(row[0]).strip()
@@ -269,6 +279,23 @@ class SelectiveMemoryRetriever:
                                 source_file=f"{db_path.name}:{target_table}",
                                 token_estimate=estimate_tokens(val)
                             ))
+
+                if not entity_matchers and topic_terms:
+                    for t in topic_terms[:3]:
+                        safe_t = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                        cursor.execute(
+                            f"SELECT {text_col} FROM {target_table} WHERE {text_col} LIKE ? ESCAPE '\\' LIMIT 3",
+                            (f"%{safe_t}%",)
+                        )
+                        for row in cursor.fetchall():
+                            val = str(row[0]).strip()
+                            if val and len(val) >= 10 and not _INJECTION_PATTERNS.search(val):
+                                items.append(MemoryItem(
+                                    entity=t,
+                                    fact=val,
+                                    source_file=f"{db_path.name}:{target_table}",
+                                    token_estimate=estimate_tokens(val)
+                                ))
         except Exception:
             pass  # Read-only probe must never crash or block
         return items

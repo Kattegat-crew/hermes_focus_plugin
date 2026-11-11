@@ -45,8 +45,8 @@ When the user requests executing a procedural task, development action, technica
 SECTION 3: 4-QUADRANT ROUTE CLASSIFICATION
 ================================================================================
 Classify the turn into exactly ONE route:
-- DIRECT_REPLY: Pure conversational courtesies, greetings, acknowledgements, or simple general knowledge Q&A that requires NEITHER historical memory NOR procedural external skills (0 tokens injected).
-- SKILL_ONLY: The user requests a procedural action or tool usage with NO historical context dependency.
+- DIRECT_REPLY: The communicative intent is purely phatic, social courtesy, conversational acknowledgement, or open general dialogue that has no procedural task objective, requires no execution of specialized tools, and has no dependency on historical project facts (0 tokens injected). When the utterance serves an interpersonal social function rather than delegating an actionable technical objective, classify strictly as DIRECT_REPLY and leave semantic_concepts and search_query empty.
+- SKILL_ONLY: The user explicitly requests executing a concrete procedural action, software modification, or specialized workflow with NO historical context dependency.
 - MEMORY_ONLY: The user asks about historical facts, agreements, decisions, or past session context, WITHOUT requesting a complex procedural tool execution.
 - ENRICHED_TASK: Complex domain task tied to historical context (executes Phase 1 memory probe to ground facts, then Phase 2 memory-enriched skill routing).
 
@@ -187,9 +187,9 @@ class CognitiveTriage:
                     raw_route = str(data.get("route", "")).strip().upper()
                     if raw_route in CognitiveRoute.__members__:
                         route = CognitiveRoute(raw_route)
-                    else:
-                        legacy_act = bool(data.get("is_actionable_task", True))
-                        legacy_skills = bool(data.get("needs_skills", legacy_act))
+                    elif "is_actionable_task" in data or "needs_skills" in data or "needs_memory" in data:
+                        legacy_act = bool(data.get("is_actionable_task", False))
+                        legacy_skills = bool(data.get("needs_skills", False))
                         legacy_mem = bool(data.get("needs_memory", False))
                         if not legacy_act or (not legacy_skills and not legacy_mem):
                             route = CognitiveRoute.DIRECT_REPLY
@@ -199,6 +199,9 @@ class CognitiveTriage:
                             route = CognitiveRoute.MEMORY_ONLY
                         else:
                             route = CognitiveRoute.SKILL_ONLY
+                    else:
+                        # Fail-closed default: when response is empty, malformed, or ambiguous, default to DIRECT_REPLY
+                        route = CognitiveRoute.DIRECT_REPLY
 
                     is_actionable = (route != CognitiveRoute.DIRECT_REPLY)
                     needs_skills = (route in (CognitiveRoute.SKILL_ONLY, CognitiveRoute.ENRICHED_TASK))
@@ -310,7 +313,10 @@ class CognitiveTriage:
         quoted = re.findall(r'["\']([^"\']+)["\']', text)
         entities = list(quoted)
 
-        # In offline fallback without LLM inference, route structurally based on presence of explicit entities
+        # Structural indicators of technical syntax, code, commands, or file extensions
+        has_code_syntax = any(c in stripped for c in [":", "/", "\\", "{", "}", "=", "<", ">", "`", "$", "#"])
+        has_file_ext = bool(re.search(r"\.\w{2,4}\b", stripped))
+
         if entities:
             route = CognitiveRoute.ENRICHED_TASK
             is_actionable = True
@@ -320,10 +326,17 @@ class CognitiveTriage:
                 entity=entities[0],
                 query_text=stripped
             )
-        else:
+        elif has_code_syntax or has_file_ext or domain_info.is_software_task:
             route = CognitiveRoute.SKILL_ONLY
             is_actionable = True
             needs_skills = True
+            needs_memory = False
+            memory_probe = None
+        else:
+            # Safe fail-closed default: non-technical text without explicit entities or model reasoning defaults to DIRECT_REPLY
+            route = CognitiveRoute.DIRECT_REPLY
+            is_actionable = False
+            needs_skills = False
             needs_memory = False
             memory_probe = None
 

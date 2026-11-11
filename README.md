@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Validation](https://img.shields.io/badge/hermes%20plugins%20validate-15%2F15%20passing-brightgreen.svg)]()
 [![Doctor](https://img.shields.io/badge/hermes%20plugins%20doctor-healthy-brightgreen.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-35%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-41%20passed-brightgreen.svg)]()
 
 > **Cognitive context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
 
@@ -148,7 +148,7 @@ plugins:
 ## Verification & Tests
 
 ```bash
-# Run pytest test suite (35 passing tests)
+# Run pytest test suite (41 passing tests)
 pytest -v
 
 # Run official Hermes Plugin validation (15/15 checks passed)

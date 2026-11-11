@@ -28,6 +28,97 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     cfg_p.add_argument("--set", metavar="KEY=VALUE", help="Set a configuration parameter (e.g. max_context_tokens=1500).")
 
 
+CONFIG_FIELD_TYPES = {
+    "enabled": bool,
+    "pre_hook_enabled": bool,
+    "router_backend": str,
+    "max_context_tokens": int,
+    "selective_memory_enabled": bool,
+    "memory_token_budget": int,
+    "software_inspection_enabled": bool,
+    "sidecar_db_path": str,
+    "receipts_path": str,
+    "timeout_ms": int,
+}
+
+
+def _coerce_and_validate(key: str, val: str) -> Tuple[Optional[Any], Optional[str]]:
+    if key not in CONFIG_FIELD_TYPES:
+        valid_keys = ", ".join(sorted(CONFIG_FIELD_TYPES.keys()))
+        return None, f"Unknown configuration setting '{key}'. Valid settings: {valid_keys}"
+
+    expected_type = CONFIG_FIELD_TYPES[key]
+    if expected_type is bool:
+        if val.lower() in ("true", "1", "yes"):
+            return True, None
+        elif val.lower() in ("false", "0", "no"):
+            return False, None
+        else:
+            return None, f"Invalid value for '{key}': expected boolean (true/false), got '{val}'"
+    elif expected_type is int:
+        try:
+            return int(val), None
+        except ValueError:
+            return None, f"Invalid value for '{key}': expected integer, got '{val}'"
+    elif expected_type is str:
+        if key == "router_backend" and val not in ("host_llm", "graph", "jev"):
+            return None, f"Invalid backend '{val}': choose from 'host_llm', 'graph', 'jev'"
+        return val, None
+
+    return val, None
+
+
+def _safe_load_yaml(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        import yaml
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except ImportError:
+        pass
+
+    try:
+        from ruamel.yaml import YAML
+        y = YAML(typ="safe")
+        with open(path, "r", encoding="utf-8") as f:
+            return y.load(f) or {}
+    except ImportError:
+        pass
+
+    return {}
+
+
+def _safe_dump_yaml(path: Path, data: dict) -> None:
+    try:
+        import yaml
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, default_flow_style=False)
+        return
+    except ImportError:
+        pass
+
+    try:
+        from ruamel.yaml import YAML
+        y = YAML()
+        with open(path, "w", encoding="utf-8") as f:
+            y.dump(data, f)
+        return
+    except ImportError:
+        pass
+
+    # Simple line-oriented YAML dumper fallback if no YAML library is present
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# Focus plugin configuration\n")
+        plugins = data.get("plugins", {})
+        entries = plugins.get("entries", {})
+        focus_cfg = entries.get("focus", {})
+        settings = focus_cfg.get("settings", {})
+        f.write("plugins:\n  entries:\n    focus:\n      settings:\n")
+        for k, v in settings.items():
+            f.write(f"        {k}: {json.dumps(v)}\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Standalone parser for testing or direct CLI execution."""
     parser = argparse.ArgumentParser(
@@ -115,30 +206,24 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
         if set_val and "=" in set_val:
             key, val = set_val.split("=", 1)
             key, val = key.strip(), val.strip()
+
+            coerced, err = _coerce_and_validate(key, val)
+            if err:
+                print(f"[ERROR] {err}")
+                return 1
+
             try:
-                import yaml
                 hermes_home = get_hermes_home()
                 cfg_path = hermes_home / "config.yaml"
-                raw_cfg = {}
-                if cfg_path.is_file():
-                    with open(cfg_path, "r", encoding="utf-8") as f:
-                        raw_cfg = yaml.safe_load(f) or {}
+                raw_cfg = _safe_load_yaml(cfg_path)
 
                 plugins = raw_cfg.setdefault("plugins", {})
                 entries = plugins.setdefault("entries", {})
                 nc = entries.setdefault("focus", {})
                 settings = nc.setdefault("settings", {})
 
-                if val.lower() in ("true", "false"):
-                    coerced = val.lower() == "true"
-                elif val.isdigit():
-                    coerced = int(val)
-                else:
-                    coerced = val
-
                 settings[key] = coerced
-                with open(cfg_path, "w", encoding="utf-8") as f:
-                    yaml.safe_dump(raw_cfg, f, default_flow_style=False)
+                _safe_dump_yaml(cfg_path, raw_cfg)
                 print(f"Successfully updated '{key}' to {coerced} in {cfg_path}")
                 return 0
             except Exception as e:

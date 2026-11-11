@@ -67,7 +67,8 @@ class GraphRouter(SkillRouterBackend):
         if not candidates:
             return None
         if len(candidates) == 1:
-            return candidates[0][0]
+            cand, score = candidates[0]
+            return cand if score >= 0.2 else None
 
         import re
 
@@ -136,7 +137,11 @@ class GraphRouter(SkillRouterBackend):
             ranked.append((c, hybrid_score))
 
         ranked.sort(key=lambda x: x[1], reverse=True)
-        return ranked[0][0]
+        top_cand, top_score = ranked[0]
+        # Require meaningful signal: reject pure noise / residual matches
+        if top_score < 0.15 and max_bm25 < 0.3:
+            return None
+        return top_cand
 
 
 class HostLLMRouter(SkillRouterBackend):
@@ -158,7 +163,8 @@ class HostLLMRouter(SkillRouterBackend):
         if not candidates:
             return None
         if len(candidates) == 1:
-            return candidates[0][0]
+            cand, score = candidates[0]
+            return cand if score >= 0.2 else None
 
         # If ctx.llm is not available, fall back to heuristic
         if self.ctx is None or not hasattr(self.ctx, "llm") or self.ctx.llm is None:

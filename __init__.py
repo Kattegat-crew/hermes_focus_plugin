@@ -9,9 +9,10 @@ while preserving KV-cache stability on the user message turn.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure neural_context package is importable when loaded by path
 _HERE = str(Path(__file__).resolve().parent)
@@ -67,6 +68,47 @@ def extract_message_text(user_message: Any) -> str:
     return str(user_message or "").strip()
 
 
+def discover_all_skill_paths(hermes_home: Path, cwd: Optional[Path] = None) -> Tuple[List[Path], List[Path]]:
+    """
+    Discovers skill files across standard Hermes installations:
+    1. Active profile / Hermes home skills directory (<hermes_home>/skills/)
+    2. Shared multi-agent skills directory (<hermes_home>/../skills/ or parent root)
+    3. Custom environment directory (HERMES_SKILLS_DIR)
+    4. Project-local sovereign skills (<cwd>/.skills/, <cwd>/.agents/skills/)
+    """
+    global_paths: List[Path] = []
+    local_paths: List[Path] = []
+
+    # 1. Profile / standard home skills
+    if hermes_home.is_dir():
+        p_skills = hermes_home / "skills"
+        if p_skills.is_dir():
+            global_paths.extend(p_skills.rglob("SKILL.md"))
+
+        # 2. Shared root skills when hermes_home is a sub-profile
+        if hermes_home.parent.name == "profiles":
+            shared_skills = hermes_home.parent.parent / "skills"
+            if shared_skills.is_dir():
+                global_paths.extend(shared_skills.rglob("SKILL.md"))
+
+    # 3. Environment variable if user customized skills location
+    env_dir = os.environ.get("HERMES_SKILLS_DIR")
+    if env_dir and Path(env_dir).is_dir():
+        global_paths.extend(Path(env_dir).rglob("SKILL.md"))
+
+    # 4. Project-local sovereign skills in current workspace
+    if cwd and cwd.is_dir():
+        for sub in [".skills", ".agents/skills", ".claude/skills"]:
+            lp = cwd / sub
+            if lp.is_dir():
+                local_paths.extend(lp.rglob("SKILL.md"))
+
+    # Deduplicate by resolved canonical path
+    deduped_global = list({p.resolve(): p for p in global_paths if p.is_file()}.values())
+    deduped_local = list({p.resolve(): p for p in local_paths if p.is_file()}.values())
+    return deduped_global, deduped_local
+
+
 def _get_services(ctx: Any = None):
     global _config, _sidecar, _triage, _coordinator, _receipt_emitter
     if _config is None:
@@ -75,9 +117,10 @@ def _get_services(ctx: Any = None):
         _sidecar = SidecarIndex(db_path=_config.sidecar_db_path)
         # Initial scan if index is empty
         if _sidecar.n_docs == 0:
-            skills_dir = get_hermes_home() / "skills"
-            if skills_dir.is_dir():
-                _sidecar.sync_skills(list(skills_dir.rglob("SKILL.md")))
+            cwd_raw = getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
+            cwd_p = Path(cwd_raw) if cwd_raw else None
+            g_paths, l_paths = discover_all_skill_paths(get_hermes_home(), cwd=cwd_p)
+            _sidecar.sync_skills(g_paths + l_paths, project_local_paths=l_paths)
     if _triage is None:
         _triage = CognitiveTriage(ctx=ctx)
     if _coordinator is None:
@@ -115,7 +158,7 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
 
     try:
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
-        cwd = kwargs.get("cwd") or getattr(ctx, "cwd", None)
+        cwd = kwargs.get("cwd") or getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
         analysis = triage.analyze(text, cwd=cwd)
         result = coordinator.execute(analysis, user_message=text, cwd=cwd)
 
