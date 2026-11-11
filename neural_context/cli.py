@@ -97,11 +97,14 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
     if cmd == "verify":
         limit = getattr(args, "limit", 10)
         stats = receipt_emitter.get_summary_stats(limit=limit)
+        token_pct = stats.get('token_reduction_pct', 0.0)
+        fast_exit_pct = stats.get('fast_exit_pct', 0.0)
         print(f"=== Neural Context Verifiable Receipts (Last {limit} turns) ===")
-        print(f"  Turns Audited : {stats.get('total_turns', 0)}")
-        print(f"  Skills Routed : {stats.get('skills_routed', 0)}")
-        print(f"  Avg Latency   : {stats.get('avg_latency_ms', 0.0)} ms")
-        print(f"  Tokens Saved  : {stats.get('total_tokens_saved', 0)} tokens")
+        print(f"  Turns Audited       : {stats.get('total_turns', 0)}")
+        print(f"  Skills Routed       : {stats.get('skills_routed', 0)}")
+        print(f"  Token Reduction     : {token_pct}% saved vs static preloading")
+        print(f"  Conversational Exit : {fast_exit_pct}% turns fast-exited with zero token bloat")
+        print(f"  Tokens Saved Total  : {stats.get('total_tokens_saved', 0)} tokens")
         return 0
 
     return 0

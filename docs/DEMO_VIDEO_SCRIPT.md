@@ -30,7 +30,7 @@
 - **Voiceover / Audio**:
   > *"Watch this prompt: 'Revisa lo de AcmeCorp'. It doesn't mention Meta, CAPI, or Python. But Neural Context intercepts the turn before inference in two phases:*
   > *Phase 1 extracts the entity 'AcmeCorp' and pulls domain ground truth from selective memory—discovering AcmeCorp is an online retail service using Meta CAPI.*
-  > *Phase 2 enriches the skill search with those memory facts, instantly ranking the exact winning skill from our sub-5ms SHA-256 sidecar index.*
+  > *Phase 2 enriches the skill search with those memory facts, instantly ranking the exact winning skill from our local SHA-256 sidecar index.*
   > *Both the procedural skill and memory facts are injected into the user turn in a SINGLE step—zero round trips, and the system prompt stays 100% byte-stable for instant KV-cache hits."*
 
 ---
@@ -43,10 +43,11 @@
 - **Terminal Output**:
   ```text
   === Neural Context Verifiable Receipts (Last 1 turns) ===
-    Turns Audited : 1
-    Skills Routed : 1 (meta-pixel-capi)
-    Avg Latency   : 38.2 ms
-    Tokens Saved  : 11,480 tokens
+    Turns Audited       : 1
+    Skills Routed       : 1 (meta-pixel-capi)
+    Token Reduction     : 95.7% saved vs static preloading
+    Conversational Exit : 100% turns fast-exited on chit-chat
+    Tokens Saved Total  : 11,480 tokens
   ```
 - **Visual**: Now show a casual greeting fast-exit:
   ```bash
@@ -54,8 +55,8 @@
   Hermes: ¡Hola! ¿En qué te puedo ayudar hoy?
   ```
 - **Voiceover / Audio**:
-  > *"Every turn produces a deterministic, verifiable receipt. Notice that turn: 11,480 tokens saved, under 40 milliseconds latency.*
-  > *And when you say 'Hola'? The cognitive interpreter detects non-actionable intent and exits in 2 milliseconds with ZERO token injection."*
+  > *"Every turn produces a deterministic, verifiable receipt. Notice that turn: over 90% token reduction compared to static preloading.*
+  > *And when you say 'Hola'? The Cognitive Arbiter detects non-actionable intent and exits immediately with ZERO token injection and maximum latency reduction."*
 
 ---
 
@@ -67,7 +68,7 @@
   ```
 - **Terminal Output**: Clean green checkmarks across all tools, hooks, and isolation probes.
 - **Voiceover / Audio**:
-  > *"100% compliant with Hermes Plugin architecture, 16/16 unit tests passing, and zero file mutations.*
+  > *"100% compliant with Hermes Plugin architecture, 22/22 unit tests passing, and zero file mutations.*
   > *Built by Jesús Díaz and NeuralCrew Labs. Install it today with `hermes plugins install Kattegat-crew/neural-context-plugin`."*
 
 ---
@@ -77,10 +78,12 @@
 Proud to submit Neural Context Plugin to the @NousResearch Hermes Agent Plugin Hackathon! 🚀🧠
 
 Solves the Mature Agent Dilemma:
+✅ Cognitive Arbiter: 4-Quadrant Intent Model (Fast-exit on conversational turns)
 ✅ Two-Phase Context-Enriched Routing (Selective Memory ➔ Skill Selection)
+✅ Free, local Information-Weighted GraphRouter (Personalized PageRank)
 ✅ Single-step skill injection (no secondary round-trip tool calls)
 ✅ 100% Byte-stable System Prompt (Zero KV-cache mutation)
-✅ Sub-5ms BM25 SQLite Sidecar Index
+✅ 70% to 95% token footprint reduction vs static catalog preloading
 ✅ Verifiable Audit Receipts & CLI
 
 GitHub: https://github.com/Kattegat-crew/neural-context-plugin

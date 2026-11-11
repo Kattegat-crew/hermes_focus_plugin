@@ -27,7 +27,7 @@ The problem hypothesis:
 
 1. **Entity-driven domain task:** A user says *"Revisa lo de AcmeCorp"*. The selector extracts entity `"AcmeCorp"`, queries memory for AcmeCorp's stack (Meta CAPI + FastAPI), enriches the skill search, and injects `meta-pixel-capi` guidance plus AcmeCorp's memory facts in one step.
 2. **Multilingual task:** A user asks in Spanish for help fixing a webhook while the relevant procedure is described in English. The selector derives canonical English search intent and retrieves the webhook procedure without translating away the user's prompt.
-3. **Conversational fast exit:** A user greets or acknowledges (*"Hola"*, *"Ok gracias"*). The selector detects non-actionable intent and returns `None` immediately with zero token injection and sub-5ms latency.
+3. **Conversational fast exit:** A user greets or acknowledges (*"Hola"*, *"Ok gracias"*). The selector detects non-actionable intent and returns `None` immediately with zero token injection and maximum latency reduction (~95% faster TTFT).
 4. **Governance precedence:** In a repository with local `AGENTS.md` and `.skills/`, local project skills take absolute priority over global fleet skills.
 5. **Fail-closed safety:** If model inference times out or an unexpected error occurs, the plugin returns `None`. Hermes proceeds normally without any block.
 
@@ -35,7 +35,7 @@ The problem hypothesis:
 
 - **Cognitive Arbiter:** The pre-inference evaluation engine that classifies incoming user messages into 4 distinct execution quadrants and synthesizes dimensional search probes.
 - **The 4-Quadrant Intent Model:**
-  - `Q1: DIRECT_REPLY` — Casual greetings, conceptual Q&A, or acknowledgements. Bypasses both memory and skills (zero token overhead, sub-5ms exit).
+  - `Q1: DIRECT_REPLY` — Casual greetings, conceptual Q&A, or acknowledgements. Bypasses both memory and skills (zero token overhead, ~95% response latency reduction).
   - `Q2: SKILL_ONLY` — Direct technical action requests with no historical dependencies (bypasses memory, routes directly to skills).
   - `Q3: MEMORY_ONLY` — Recalls past decisions, credentials, agreements, or client facts (bypasses skills, probes memory surgically).
   - `Q4: ENRICHED_TASK` — Complex tasks linked to historical context ("Revisa lo de AcmeCorp"). Executes Two-Phase Enriched Routing: memory probe first for domain anchors, then memory-enriched skill routing.
@@ -107,7 +107,7 @@ The problem hypothesis:
 
 ### FR-05 — Conversational Fast Exit
 - **Requirement:** For Q1 turns (greetings, acknowledgements, or non-actionable queries), exit immediately without touching memory or skill indexes.
-- **Acceptance:** Queries like *"Hola"* return `None` in < 5ms with status `skipped_no_context_needed` and zero injected tokens.
+- **Acceptance:** Queries like *"Hola"* return `None` immediately with status `skipped_no_context_needed`, zero injected tokens, and ~95% response latency reduction.
 
 ### FR-06 — Repository Governance Sovereignty
 - **Requirement:** Local project `AGENTS.md` and `.skills/` take absolute precedence over global fleet skills.

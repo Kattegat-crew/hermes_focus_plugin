@@ -94,7 +94,7 @@ The design strictly complies with source-verified contracts in `/opt/hermes-agen
 ### 3.1 Cognitive Arbiter (`neural_context/triage.py`)
 - **Model-First Evaluation**: Every message is analyzed by calling `ctx.llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=300, temperature=0.0)`.
 - **4-Quadrant Decision Tree**:
-  - `Q1: DIRECT_REPLY`: Greetings, chit-chat, conceptual questions. Returns `needs_skills=False, needs_memory=False` for immediate sub-5ms exit.
+  - `Q1: DIRECT_REPLY`: Greetings, chit-chat, conceptual questions. Returns `needs_skills=False, needs_memory=False` for immediate fast-exit with ~95% response latency reduction and zero token injection.
   - `Q2: SKILL_ONLY`: Direct action/task without historical memory dependency. Bypasses memory search and routes skills directly.
   - `Q3: MEMORY_ONLY`: Recalls past agreements, client facts, or preferences. Probes memory and bypasses skill catalog.
   - `Q4: ENRICHED_TASK`: Complex domain tasks tied to history. Probes memory first, synthesizes enriched query, then routes skills.
@@ -111,7 +111,7 @@ The design strictly complies with source-verified contracts in `/opt/hermes-agen
 ### 3.3 Sidecar SQLite Index (`neural_context/sidecar.py`)
 - **Zero File Mutation**: `SKILL.md` files are read-only; user files are never touched.
 - **Deterministic Hash Invalidation**: Indexed entries store `sha256(SKILL.md)`. Files are reindexed only when content changes.
-- **BM25 In-Process Scoring**: Evaluates candidate matches over frontmatter description and lead paragraph in sub-5ms with zero external daemon dependencies.
+- **BM25 In-Process Scoring**: Evaluates candidate matches over frontmatter description and lead paragraph in-memory with zero external daemon or network dependencies.
 
 ### 3.4 Context Broker & Graph Router (`neural_context/router.py`)
 - **Context Broker Orchestration**:

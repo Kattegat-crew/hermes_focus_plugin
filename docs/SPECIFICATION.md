@@ -170,7 +170,7 @@ The routing pipeline does not treat memory and skills as isolated independent si
   1. `skill_name`
   2. Frontmatter `description` (≤ 60 chars)
   3. First lead paragraph (clean text, ≤ 400 chars)
-- **Performance**: Sub-5ms BM25 scoring over 1,000 skills with zero external daemon dependencies.
+- **Performance**: High-efficiency in-memory SQLite BM25 scoring over large catalogs with zero external daemon dependencies.
 
 ### 4.2 Pluggable Router Backends (`router.py`)
 To guarantee high marks on Hackathon judges' **Reliability** and **Usefulness** criteria, the plugin must never fail if an external paid API key is missing:
@@ -187,10 +187,13 @@ class SkillRouterBackend(ABC):
         pass
 
 class HostLLMRouter(SkillRouterBackend):
-    """Default: Uses ctx.llm (the user's existing configured model) to rank top candidates."""
+    """Default: Uses ctx.llm (the user's existing configured model) to rank top candidates with GraphRouter fallback."""
+
+class GraphRouter(SkillRouterBackend):
+    """Free & Local: Information-weighted bipartite spreading activation (Personalized PageRank) with 0 API cost."""
 
 class FastHeuristicRouter(SkillRouterBackend):
-    """Fallback: Zero-cost, sub-2ms BM25 + heuristic matching over sidecar index."""
+    """Fallback: Zero-cost in-process BM25 candidate selection."""
 
 class JevRouter(SkillRouterBackend):
     """Opt-in: For deployments with TYPESAFE_API_KEY configured."""
