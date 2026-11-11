@@ -28,13 +28,6 @@ _FORBIDDEN_PREFIXES = (
     Path("/root/.ssh"),
 )
 
-_GRAMMATICAL_STOPWORDS = {
-    "del", "las", "los", "con", "por", "para", "que", "una", "uno", "este", "esta", "estos", "estas",
-    "como", "pero", "sobre", "entre", "hacia", "desde", "hasta",
-    "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "been", "have", "has",
-    "had", "not", "but", "about", "into", "over", "after"
-}
-
 
 def is_safe_memory_file(path: Path) -> bool:
     """Validate path safety against symlink traversal and denial of service."""
@@ -81,7 +74,7 @@ class SelectiveMemoryRetriever:
         if probe and probe.entity and probe.entity.strip() not in clean_entities:
             clean_entities.append(probe.entity.strip())
 
-        # Collect topic keywords from probe excluding grammatical function words
+        # Collect topic keywords from model-extracted probe
         topic_terms: List[str] = []
         if probe:
             for text_source in [probe.topic, probe.query_text]:
@@ -89,7 +82,7 @@ class SelectiveMemoryRetriever:
                     tokens = re.findall(r"[\w]{3,}", text_source, re.UNICODE)
                     for tok in tokens:
                         t_low = tok.lower()
-                        if t_low not in topic_terms and len(t_low) >= 3 and t_low not in _GRAMMATICAL_STOPWORDS:
+                        if t_low not in topic_terms and len(t_low) >= 3:
                             topic_terms.append(t_low)
 
         if not clean_entities and not topic_terms:

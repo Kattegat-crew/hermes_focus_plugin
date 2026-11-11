@@ -45,8 +45,8 @@ def test_conversational_text_structural_fallback_defaults_to_direct_reply():
     assert res.needs_skills is False
 
 
-def test_memory_stopwords_filter_prevents_preposition_matches(tmp_path: Path, monkeypatch):
-    """Ensure common grammatical function words ('del', 'de', 'con') do not cause false positive memory matches."""
+def test_memory_discriminative_matching_prevents_spurious_single_word_matches(tmp_path: Path, monkeypatch):
+    """Ensure multi-term query requires cooccurrence of discriminative terms, preventing spurious single-word matches without language stopword lists."""
     empty_home = tmp_path / "empty_home"
     empty_home.mkdir()
     monkeypatch.setattr("neural_context.memory.get_hermes_home", lambda: empty_home)
@@ -59,14 +59,14 @@ def test_memory_stopwords_filter_prevents_preposition_matches(tmp_path: Path, mo
     )
 
     retriever = SelectiveMemoryRetriever(token_budget=0)
-    # Query with preposition "del" and "sobre" - should not match unless discriminative terms match
+    # Query with preposition "del" and "sobre" - should not match unless discriminative terms co-occur
     probe = MemoryProbe(
         query_text="cual es el estado del servidor",
         topic="del"
     )
 
     results = retriever.retrieve(probe=probe, cwd=str(tmp_path))
-    # "del" is filtered out from topic_terms; "servidor" does not appear in the memory lines
+    # Cooccurrence requires min(2, len(topic_matchers)) matches; isolated match for 'del' does not trigger
     assert len(results) == 0
 
 

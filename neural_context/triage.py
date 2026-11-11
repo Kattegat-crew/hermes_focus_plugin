@@ -22,9 +22,10 @@ When the user query implies recalling past interactions, agreements, client fact
    - WHAT: Isolate the core informational object: agreement, architecture decision, credentials/keys, bug/incident, business constraint, or deliverable.
    - WHEN: Identify temporal anchors (e.g., 'yesterday', 'last sprint', 'previous turn', 'last week').
    - WHERE: Identify environment or platform scope (e.g., 'production', 'staging', 'database', 'landing page', 'github').
-2. Document Vocabulary Normalization:
+2. Document Vocabulary Normalization & Discriminative Filtering:
    Human speech is conversational and colloquial ("lo que pactamos", "what we decided", "las claves del server").
-   Normalize colloquial references into factual documentation terminology ("acuerdos", "decisiones", "credenciales", "especificaciones", "compromisos") that matches how engineers document facts in MEMORY.md files.
+   Normalize colloquial references into factual documentation terminology ("acuerdos", "decisiones", "credenciales", "especificaciones", "compromisos") that matches how engineers document facts in memory files.
+   Extract ONLY substantive, distinctive nouns and domain entities. NEVER include grammatical glue words, conjunctions, prepositions, articles, or conversational filler in query_text across ANY language. Formulate query_text as 1 to 4 high-entropy, discriminative search terms in the interaction language.
 3. Strict Native Language Preservation:
    The memory probe (topic, time_anchor, query_text) MUST remain in the EXACT interaction language used by the user. NEVER translate memory probes to English if the user speaks another language, because local memory files (MEMORY.md, USER.md, PROJECT_MEMORY.md) are recorded in the interaction language.
 4. Absence Certainty (Anti-Hallucination):
