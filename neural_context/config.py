@@ -32,7 +32,7 @@ class PluginConfig(BaseModel):
     enabled: bool = True
     pre_hook_enabled: bool = True
     router_backend: str = "host_llm"
-    max_context_tokens: int = 1200
+    max_context_tokens: int = 2500
     selective_memory_enabled: bool = True
     memory_token_budget: int = 400
     software_inspection_enabled: bool = True

@@ -113,7 +113,7 @@ An intelligent, pre-inference cognitive context engine registered at the native 
   - If `needs_skills: true`: Queries the sidecar index using the model's synthesized dual-form search phrase and canonical capability nouns in English, enriched by Phase 1 domain context.
   - If `needs_memory: true`: Surgically extracts only facts matching `extracted_entities`.
 
-### Step 2: Two-Phase Context-Enriched Routing Pipeline
+### Step 2: Two-Phase Context-Enriched Routing Pipeline (Context Broker)
 The routing pipeline does not treat memory and skills as isolated independent silos. Instead, memory acts as **domain ground-truth feedback** for skill selection:
 
 1. **Phase 1: Selective Memory Query (Domain Ground Truth)**:
@@ -124,10 +124,10 @@ The routing pipeline does not treat memory and skills as isolated independent si
    - The skill search query is enriched with the technical domain facts uncovered in Phase 1:
      `enriched_query = f"{search_query} | Domain context: AcmeCorp (Meta Conversions API CAPI, FastAPI)"`
    - BM25 candidate scoring ranks relevant procedures against the enriched query.
-   - The winning skill is selected either via `HostLLMRouter` (using `ctx.llm.complete(messages=[...])` with memory context provided) or `FastHeuristicRouter`.
+   - The winning skill is selected either via `GraphRouter` (using spreading activation / Personalized PageRank across the bipartite concept graph) or `HostLLMRouter` (using `ctx.llm.complete(messages=[...])` with memory context provided).
    - **Local Workspace Sovereignty**: In software repositories with `AGENTS.md` and `.skills/`, local project skills take absolute precedence over global fleet skills.
 
-### Step 3: Single-Step Ingestion & Shared Context Budget
+### Step 3: Single-Step Ingestion & Adaptive Context Budget
 - **The One-Step Advantage**: Existing routers (`typesafe-skill-router`, `jev-skill-router`) only emit a `<skill_relevance>` tag with the skill name. The agent then has to make a separate tool call (`skill_view` / `read_file`) and wait for another full LLM round-trip (costing ~20,000 tokens of re-sent context).
 - **Our Pattern**: The plugin loads the complete procedural content of the winning `SKILL.md` directly into the turn context:
   ```markdown
@@ -141,7 +141,7 @@ The routing pipeline does not treat memory and skills as isolated independent si
   [Instruction: Use this context as authoritative procedural guidance for this turn.]
   </neural_context>
   ```
-- **Shared Budget Constraint**: Total injected context is bounded by a strict ceiling (default: 1,200 tokens). If `SKILL.md` is unusually long, the first 500 lines / core procedure are injected.
+- **Adaptive Token Optimization**: Injected context is dynamically optimized to minimize token consumption per turn without arbitrarily chopping complex technical workflows. Default ceiling (`max_context_tokens`) is configurable (default: 2,500 tokens), with graceful line pruning at step boundaries if necessary.
 
 ### Step 4: Ephemeral Assembly & KV-Cache Stability
 - **KV-Cache Contract**: In modern LLM inference (Claude, OpenAI, vLLM, DeepSeek), altering the System Prompt invalidates prompt caching across the entire session, destroying cache-hit rates and increasing TTFT.

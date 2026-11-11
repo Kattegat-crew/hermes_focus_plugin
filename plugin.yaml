@@ -39,7 +39,8 @@ config_schema:
     description: "Router engine: 'host_llm' (uses user active model with graph fallback), 'graph' (100% free graph-theoretic semantic router), or 'jev'"
   max_context_tokens:
     type: int
-    default: 1200
+    default: 2500
+    description: "Adaptive context ceiling: minimizes token overhead on simple turns while preserving procedural depth on complex tasks"
   selective_memory_enabled:
     type: bool
     default: true

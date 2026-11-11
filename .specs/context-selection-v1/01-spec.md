@@ -33,10 +33,20 @@ The problem hypothesis:
 
 ### Terms
 
-- **Two-Phase Context-Enriched Routing:** Pipeline where Phase 1 queries selective memory for detected entities to ground technical facts, and Phase 2 uses those facts to enrich skill discovery and single-skill routing.
-- **Abstention / Fast Exit:** Returning `None` when no specialized skills or memories are needed, allowing the host turn to proceed with zero injected overhead.
+- **Cognitive Arbiter:** The pre-inference evaluation engine that classifies incoming user messages into 4 distinct execution quadrants and synthesizes dimensional search probes.
+- **The 4-Quadrant Intent Model:**
+  - `Q1: DIRECT_REPLY` — Casual greetings, conceptual Q&A, or acknowledgements. Bypasses both memory and skills (zero token overhead, sub-5ms exit).
+  - `Q2: SKILL_ONLY` — Direct technical action requests with no historical dependencies (bypasses memory, routes directly to skills).
+  - `Q3: MEMORY_ONLY` — Recalls past decisions, credentials, agreements, or client facts (bypasses skills, probes memory surgically).
+  - `Q4: ENRICHED_TASK` — Complex tasks linked to historical context ("Revisa lo de AcmeCorp"). Executes Two-Phase Enriched Routing: memory probe first for domain anchors, then memory-enriched skill routing.
+- **Dimensional Query Synthesis:** The Cognitive Arbiter translates ambiguous human phrasing into structured search queries:
+  - `Memory Probe`: Structured tuple `(entity/subject, platform/scope, temporal_anchor)`.
+  - `Skill Dispatch Intent`: Canonical English action summary, capability nouns (`["conversions-api", "event-deduplication"]`), and search query.
+- **Context Broker:** The execution coordinator that manages surgical memory retrieval, runs graph-theoretic skill selection, and assembles the ephemeral context block.
+- **Information-Weighted Graph Router (`GraphRouter`):** A zero-cost, local, sub-millisecond semantic router using bipartite concept-skill spreading activation (Personalized PageRank) penalized by Information Content (TF-IDF), eliminating dependencies on external paid routing services.
+- **Adaptive Token Optimization:** Dynamic context bounding that minimizes tokens per response without artificially choking complex projects whose technical procedures exceed rigid thresholds.
 - **Ephemeral Context:** Injected context returned via `{"context": "..."}` appended strictly to the user message turn, leaving the system prompt byte-stable for prompt caching.
-- **Verifiable Receipt:** Deterministic JSON record logged per turn to `receipts.jsonl` proving latency, token savings, and execution status.
+- **Verifiable Receipt:** Deterministic JSON record logged per turn to `receipts.jsonl` proving latency, tokens saved, platform, active model, and execution status.
 
 ## 3. Verified reuse inventory and constraints
 
@@ -79,12 +89,12 @@ The problem hypothesis:
 
 ## 6. Functional Requirements and Observable Acceptance
 
-### FR-01 — Cognitive Semantic Interpretation
-- **Requirement:** Evaluate user message intent via model inference (`ctx.llm`); do not classify intent using fixed keyword dictionaries.
-- **Acceptance:** Informal phrasing, slang, typos, and Spanish prompts are interpreted correctly into canonical English intent and capability nouns.
+### FR-01 — Cognitive Semantic Interpretation (Cognitive Arbiter)
+- **Requirement:** Evaluate user message intent via model inference (`ctx.llm`) and classify into the 4-Quadrant Model (Q1: Direct Reply, Q2: Skill Only, Q3: Memory Only, Q4: Enriched Task). Synthesize dimensional probes for memory and canonical English capability terms for skills. Do not classify intent using fixed keyword dictionaries.
+- **Acceptance:** Informal phrasing, slang, typos, and Spanish prompts are interpreted correctly into the right quadrant, canonical English intent, and capability nouns.
 
-### FR-02 — Two-Phase Context-Enriched Routing
-- **Requirement:** When named entities are present, query selective memory first for technical domain ground truth and use retrieved facts to enrich the skill search query.
+### FR-02 — Two-Phase Context-Enriched Routing (Context Broker)
+- **Requirement:** For Q4 tasks with named entities, query selective memory first for technical domain ground truth and use retrieved facts to enrich the skill search query via the Information-Weighted Graph Router (`GraphRouter`) or Host LLM.
 - **Acceptance:** A prompt mentioning entity *"AcmeCorp"* retrieves AcmeCorp's tech stack (Meta CAPI + FastAPI) and routes accurately to `meta-pixel-capi`, even when CAPI is not mentioned in the user prompt.
 
 ### FR-03 — Single-Step Ingestion
@@ -96,16 +106,16 @@ The problem hypothesis:
 - **Acceptance:** Hook returns `{"context": "..."}` which Hermes appends to user content without modifying system prompt bytes.
 
 ### FR-05 — Conversational Fast Exit
-- **Requirement:** For greetings, acknowledgements, or non-actionable queries, exit immediately without touching memory or skill indexes.
+- **Requirement:** For Q1 turns (greetings, acknowledgements, or non-actionable queries), exit immediately without touching memory or skill indexes.
 - **Acceptance:** Queries like *"Hola"* return `None` in < 5ms with status `skipped_no_context_needed` and zero injected tokens.
 
 ### FR-06 — Repository Governance Sovereignty
 - **Requirement:** Local project `AGENTS.md` and `.skills/` take absolute precedence over global fleet skills.
 - **Acceptance:** When working in a documented workspace, local skills are indexed and preferred; global skills that conflict are excluded.
 
-### FR-07 — Shared Token Budget
-- **Requirement:** Enforce a hard ceiling (default: 1,200 tokens) across skill body and memory facts combined.
-- **Acceptance:** Long skills are capped at core procedural sections; memory facts are bounded by `memory_token_budget` (400 tokens).
+### FR-07 — Adaptive & Dynamic Token Optimization
+- **Requirement:** Minimize tokens per response without sacrificing procedural depth. Enforce a configurable dynamic ceiling (`max_context_tokens`, default: 2,500) with surgical line pruning at step boundaries rather than premature rigid truncation.
+- **Acceptance:** Simple queries inject minimal tokens; deep multi-step skills retain critical procedural instructions; memory facts are bounded by `memory_token_budget` (default: 400–600 tokens).
 
 ### FR-08 — Fail-Closed Graceful Degradation
 - **Requirement:** Any exception, timeout, or parsing failure must return `None` immediately, allowing Hermes to proceed normally without blocking.

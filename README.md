@@ -40,16 +40,28 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
                                      │
                                      ▼
         ┌─────────────────────────────────────────────────────────┐
-        │   STEP 2: TWO-PHASE CONTEXT-ENRICHED ROUTING PIPELINE   │
+        │            STEP 1: COGNITIVE ARBITER                    │
+        │  - Evaluates message before model execution (ctx.llm)   │
+        │  - Classifies into 4 Quadrants:                         │
+        │    Q1: Direct Reply (Fast Exit, 0 tokens)               │
+        │    Q2: Skill Only (Independent of past history)         │
+        │    Q3: Memory Only (Recalls facts, bypasses skills)     │
+        │    Q4: Enriched Task (Memory probe -> Skill route)      │
+        │  - Dimensional Query Synthesis (Subject, Scope, Intent) │
+        └────────────────────────────┬────────────────────────────┘
+                                     │
+                                     ▼
+        ┌─────────────────────────────────────────────────────────┐
+        │            STEP 2: CONTEXT BROKER ORCHESTRATION         │
         │                                                         │
-        │ Phase 1: Selective Memory Query (Domain Ground Truth)   │
+        │ Phase 1: Surgical Memory Probe (Domain Ground Truth)    │
         │  - Queries memory strictly for extracted named entities │
-        │  - Extracts factual hints (e.g. "AcmeCorp uses Meta CAPI")│
+        │  - Extracts factual hints (e.g. AcmeCorp stack)         │
         │                                                         │
-        │ Phase 2: Memory-Enriched Skill Search & Routing         │
-        │  - Injects Phase 1 domain hints into skill search query │
-        │  - BM25 candidate shortlisting over sidecar SQLite index│
-        │  - Single winning skill selected (HostLLM/Heuristic)    │
+        │ Phase 2: Information-Weighted Graph Routing             │
+        │  - Spreading Activation / Personalized PageRank         │
+        │  - Multi-hop traversal: Entity -> Domain -> Winning Skill│
+        │  - 100% Free, offline, sub-ms; Host LLM fallback on tie │
         │  - Local workspace AGENTS.md/.skills/ sovereignty       │
         └────────────────────────────┬────────────────────────────┘
                                      │
@@ -58,7 +70,8 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
         │     STEP 3: SINGLE-STEP SKILL & MEMORY INGESTION        │
         │  - Ingest winning SKILL.md body immediately             │
         │  - Eliminates secondary round-trip tool calls           │
-        │  - Enforces shared token budget (≤ 1,200 tokens total)  │
+        │  - Dynamic token optimization: minimize per turn        │
+        │    without sacrificing necessary procedural depth       │
         └────────────────────────────┬────────────────────────────┘
                                      │
                                      ▼
@@ -67,6 +80,7 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
         │  - Injects context into USER message turn               │
         │  - System Prompt remains 100% BYTE-STABLE (KV-Cache OK) │
         │  - Emits verifiable audit record to `receipts.jsonl`    │
+        │  - Tracks channel platform & active model provenance    │
         └────────────────────────────┬────────────────────────────┘
                                      │
                                      ▼
@@ -77,12 +91,16 @@ In standard LLM agent systems, context provisioning faces an architectural dilem
 
 ## Key Differentiators
 
-- **Two-Phase Context-Enriched Routing**: Memory facts and skill procedures are not isolated silos. Extracted named entities query memory first to establish domain ground truth (e.g. knowing AcmeCorp uses Meta CAPI with FastAPI), which enriches the skill search to pinpoint the exact winning procedural skill.
+- **Cognitive Arbiter (4-Quadrant Triage)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`, synthesizing dimensional search probes rather than doing naive full-dump injections.
+- **Zero-Cost Information-Weighted Graph Routing (`GraphRouter`)**: Uses bipartite spreading activation (Personalized PageRank) penalized by Information Content to resolve multi-hop context (e.g. `AcmeCorp` $\to$ domain stack $\to$ winning skill) in $<1\text{ ms}$ with zero external API fees.
+- **Multichannel & Model-Agnostic**: Intercepts turns seamlessly across CLI, Discord, Telegram, WhatsApp, and Desktop, running on whatever active model the user configured in Hermes (`ctx.llm`).
+- **Two-Phase Context-Enriched Routing**: Memory facts and skill procedures are not isolated silos. Extracted named entities query memory first to establish domain ground truth, which enriches the skill search to pinpoint the exact winning procedural skill.
 - **Preserves KV-Cache Stability**: Unlike mechanisms that alter the System Prompt, returning ephemeral context from `pre_llm_call` appends to the user turn, keeping the system prompt byte-stable for maximum prompt-cache hits and lowest TTFT.
 - **Single-Step Ingestion**: Unlike existing routers that only emit a tag with the skill name (forcing the agent into a second round-trip costing ~20,000 tokens of re-sent context), Neural Context inlines the winning skill procedure immediately.
+- **Adaptive Token Optimization**: Dynamically bounds injected context (`max_context_tokens`, default: 2,500) with surgical line pruning at step boundaries, minimizing tokens per turn without arbitrarily truncating complex procedures.
 - **Repository Governance Sovereignty**: When working in a software repository with `AGENTS.md` and local `.skills/`, local project rules take absolute precedence over global catalog skills.
 - **Zero File Mutation & SHA-256 Sidecar Index**: User `SKILL.md` files are never touched or modified. All metadata is cached in SQLite (`sidecar_index.db`) and invalidated deterministically by file hash.
-- **Verifiable Audit Receipts**: Every turn writes a structured record to `receipts.jsonl` detailing execution latency, tokens saved, gate scores, and fallback status.
+- **Verifiable Audit Receipts**: Every turn writes a structured record to `receipts.jsonl` detailing execution latency, tokens saved, platform, active model, and routing status.
 
 ---
 

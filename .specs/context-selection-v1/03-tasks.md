@@ -50,7 +50,7 @@ Each task below is planned work, not authorization to execute it now. Exact futu
 | FR-04 ephemeral user-turn / stable system prompt | Tasks 8, 13 |
 | FR-05 conversational fast exit | Tasks 4, 12, 14 |
 | FR-06 local governance precedence | Tasks 6, 11 |
-| FR-07 shared ≤1,200-token budget | Tasks 12–14 |
+| FR-07 adaptive token optimization | Tasks 12–14 |
 | FR-08 fail-closed continuation | Tasks 11–14 |
 | FR-09 auditable receipts | Tasks 7, 13; resolve SQLite-vs-JSONL conflict explicitly |
 | FR-10 Hermes compatibility | Tasks 8, 15 |
@@ -74,10 +74,10 @@ Each task below is planned work, not authorization to execute it now. Exact futu
 
 ### Task 13 — Injection budget, receipt persistence, and per-turn integrity
 
-- [x] **Owner outcome:** Combine complete selected skill plus bounded memory facts within ≤1,200 total injected tokens; keep system prompt bytes unchanged; remove unsafe cross-turn fallback; emit per-turn receipt without raw prompt leakage.
+- [x] **Owner outcome:** Dynamically optimize context (max_context_tokens, default: 2,500) to minimize tokens per turn without sacrificing procedural completeness; keep system prompt bytes unchanged; remove unsafe cross-turn fallback; emit per-turn receipt with platform and model provenance.
 - **Skill:** `.skills/design-fail-closed-gate/SKILL.md`; `.skills/hermes-plugin-development/SKILL.md`.
 - **Future edit surface:** `neural_context/router.py`; `neural_context/memory.py`; `neural_context/models.py`; `neural_context/receipt.py`; `__init__.py`; `neural_context/config.py`; `tests/test_router.py`; `tests/test_receipt.py`; `tests/test_plugin_entrypoint.py`.
-- **Acceptance:** Combined context strictly bounded <= 1,200 tokens via iterative line trimming; each receipt maps only to exact `session_id:turn_id`, with no `popitem()` fallback.
+- **Acceptance:** Context dynamically minimizes overhead on casual turns and retains complete procedures on complex technical tasks; iterative line trimming guards ceiling; each receipt maps only to exact `session_id:turn_id`, with no `popitem()` fallback.
 - **Checks:** `pytest tests/test_router.py tests/test_receipt.py tests/test_plugin_entrypoint.py -v`.
 
 ### Task 14 — Minimal end-to-end deterministic demo path

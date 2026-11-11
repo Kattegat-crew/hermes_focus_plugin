@@ -21,25 +21,30 @@ Instead of treating skills and memories as isolated silos, it executes a **Two-P
                                         │
                                         ▼
            ┌─────────────────────────────────────────────────────────┐
-           │        STEP 1: COGNITIVE SEMANTIC INTERPRETER           │
-           │  - Model evaluates communicative intent (ctx.llm)       │
-           │  - Synthesizes dual-form English search query           │
-           │  - Extracts named entities (brands, projects, clients)  │
-           │  - Determines if task requires procedural skills/memory │
+           │            STEP 1: COGNITIVE ARBITER                    │
+           │  - Pre-inference evaluation on active model (ctx.llm)   │
+           │  - Classifies into 4 Quadrants:                         │
+           │    Q1: Direct Reply (Fast Exit, 0 tokens)               │
+           │    Q2: Skill Only (No memory dependency)                │
+           │    Q3: Memory Only (Fact / agreement recall)            │
+           │    Q4: Enriched Task (Memory probe -> Skill route)      │
+           │  - Dimensional Query Synthesis:                         │
+           │    * Memory Probe: (subject, platform, temporal_anchor) │
+           │    * Skill Dispatch: (canonical action, capabilities)   │
            └────────────────────────────┬────────────────────────────┘
                                         │
                                         ▼
            ┌─────────────────────────────────────────────────────────┐
-           │   STEP 2: TWO-PHASE CONTEXT-ENRICHED ROUTING PIPELINE   │
+           │            STEP 2: CONTEXT BROKER ORCHESTRATION         │
            │                                                         │
-           │ Phase 1: Selective Memory Query (Domain Ground Truth)   │
-           │  - Queries memory strictly for extracted named entities │
-           │  - Extracts factual hints (e.g. "AcmeCorp uses Meta CAPI") │
+           │ Phase 1: Surgical Memory Probe (Domain Ground Truth)    │
+           │  - Resolves bounded paths (~/.hermes/memories/, etc.)   │
+           │  - Extracts factual anchors (e.g. AcmeCorp stack)       │
            │                                                         │
-           │ Phase 2: Memory-Enriched Skill Search & Routing         │
-           │  - Injects Phase 1 domain hints into skill search query │
-           │  - BM25 candidate shortlisting over sidecar SQLite index│
-           │  - Single winning skill selected (HostLLM/Heuristic)    │
+           │ Phase 2: Information-Weighted Graph Routing             │
+           │  - Spreading Activation / Personalized PageRank         │
+           │  - Multi-hop traversal: Entity -> Domain -> Winning Skill│
+           │  - Ambiguity Gate: Escalates to Host LLM on tie         │
            │  - Local workspace AGENTS.md/.skills/ sovereignty       │
            └────────────────────────────┬────────────────────────────┘
                                         │
@@ -48,7 +53,8 @@ Instead of treating skills and memories as isolated silos, it executes a **Two-P
            │        STEP 3: SINGLE-STEP SKILL & MEMORY INGESTION     │
            │  - Ingest winning SKILL.md body immediately             │
            │  - Combine procedural skill with active memory facts    │
-           │  - Enforce shared token budget (≤ 1,200 tokens total)   │
+           │  - Dynamic token optimization: minimize per turn        │
+           │    without sacrificing necessary procedural depth       │
            └────────────────────────────┬────────────────────────────┘
                                         │
                                         ▼
@@ -57,6 +63,7 @@ Instead of treating skills and memories as isolated silos, it executes a **Two-P
            │  - Inject context into USER message turn                │
            │  - System Prompt remains 100% BYTE-STABLE (KV-Cache OK) │
            │  - Emit verifiable audit record to receipts.jsonl       │
+           │  - Record channel platform and active model provenance  │
            └────────────────────────────┬────────────────────────────┘
                                         │
                                         ▼
@@ -78,34 +85,27 @@ The design strictly complies with source-verified contracts in `/opt/hermes-agen
 | **Host LLM Facade** | `/opt/hermes-agent/agent/plugin_llm.py:486-514` | `ctx.llm.complete(messages=list[dict], max_tokens=int, temperature=float)` returns `PluginLlmCompleteResult` with `.text`. Structured messages list `[{"role": "user", "content": prompt}]` is required. |
 | **Tool Registration** | `/opt/hermes-agent/tools/registry.py:832-851` | Tool schemas must be unwrapped dictionaries with top-level `parameters`: `{"name": str, "description": str, "parameters": {"type": "object", ...}}`. |
 | **CLI Registration** | `/opt/hermes-agent/hermes_cli/plugins_context.py:442` | `ctx.register_cli_command(name, help, setup_fn, handler_fn)` connects `hermes neural-context <subcommand>` by passing the subparser to `setup_fn`. |
-| **Storage Isolation** | `/opt/hermes-agent/plugins/plugin_storage.py:27-46` | Data stored in `<HERMES_HOME>/plugins/neural-context-plugin/` isolated per active profile. |
+| **Storage Isolation** | `/opt/hermes-agent/plugins/plugin_storage.py:27-46` | Data stored in `<HERMES_HOME>/plugin-data/neural-context-plugin/` isolated per active profile. |
 
 ---
 
 ## 3. Subsystem Technical Specifications
 
-### 3.1 Cognitive Semantic Interpreter (`neural_context/triage.py`)
+### 3.1 Cognitive Arbiter (`neural_context/triage.py`)
 - **Model-First Evaluation**: Every message is analyzed by calling `ctx.llm.complete(messages=[{"role": "user", "content": prompt}], max_tokens=300, temperature=0.0)`.
-- **Zero Static Wordlists**: No brittle hardcoded keyword lists or regexes.
-- **Structured Schema (`TriageAnalysis`)**:
-  ```python
-  class TriageAnalysis(BaseModel):
-      is_actionable_task: bool
-      needs_skills: bool
-      needs_memory: bool
-      intent_summary_en: str
-      search_query: str
-      required_capabilities: List[str]
-      extracted_entities: List[str]
-      domain: DomainClassification
-      reasoning: str
-      confidence: float
-  ```
-- **Conversational Fast Exit**: If `is_actionable_task` is False or neither skills nor memory are needed, triage returns `needs_skills=False, needs_memory=False`. The coordinator exits in < 2ms, returning `None`.
+- **4-Quadrant Decision Tree**:
+  - `Q1: DIRECT_REPLY`: Greetings, chit-chat, conceptual questions. Returns `needs_skills=False, needs_memory=False` for immediate sub-5ms exit.
+  - `Q2: SKILL_ONLY`: Direct action/task without historical memory dependency. Bypasses memory search and routes skills directly.
+  - `Q3: MEMORY_ONLY`: Recalls past agreements, client facts, or preferences. Probes memory and bypasses skill catalog.
+  - `Q4: ENRICHED_TASK`: Complex domain tasks tied to history. Probes memory first, synthesizes enriched query, then routes skills.
+- **Dimensional Query Synthesis**:
+  - `Memory Probe`: Structured entity and temporal/platform scope.
+  - `Skill Dispatch Intent`: Canonical English action summary and technical capability nouns (`kebab-case`).
 
 ### 3.2 Selective Memory Retriever (`neural_context/memory.py`)
-- **Entity-Driven Targeting**: Instead of full memory dumps, only facts matching `extracted_entities` (length ≥ 3) are retrieved.
-- **Search Roots**: Looks in current workspace `cwd`, `~/.hermes/`, `~/.hermes/memories/`, `~/.hermes/shared/` for `MEMORY.md`, `USER.md`, and `PROJECT_MEMORY.md`.
+- **Entity-Driven Targeting**: Instead of full memory dumps, only facts matching `extracted_entities` are retrieved.
+- **Bounded Search Roots**: Looks strictly in `PROJECT_MEMORY.md`, `MEMORY.md`, `USER.md`, and `~/.hermes/memories/*.md`.
+- **Adversarial Content Sanitization**: Neutralizes unauthorized instruction override attempts and malicious system tags from memory lines.
 - **Token Ceiling**: Memory injection is strictly capped at `memory_token_budget` (default: 400 tokens).
 
 ### 3.3 Sidecar SQLite Index (`neural_context/sidecar.py`)
@@ -113,16 +113,23 @@ The design strictly complies with source-verified contracts in `/opt/hermes-agen
 - **Deterministic Hash Invalidation**: Indexed entries store `sha256(SKILL.md)`. Files are reindexed only when content changes.
 - **BM25 In-Process Scoring**: Evaluates candidate matches over frontmatter description and lead paragraph in sub-5ms with zero external daemon dependencies.
 
-### 3.4 Skill Router & Coordinator (`neural_context/router.py`)
-- **Two-Phase Enriched Routing**:
-  1. *Phase 1*: Query memory for `extracted_entities`. If facts exist, build `memory_hints = " ".join([f"{m.entity}: {m.fact}" for m in memories])`.
-  2. *Phase 2*: Combine `search_query`, `intent_summary_en`, `required_capabilities`, and `memory_hints` into an enriched query. BM25 shortlists candidates, and `HostLLMRouter` selects the winner.
-  3. *Phase 3*: Assemble `<neural_context>` block with winning skill procedure (frontmatter stripped) + active memory facts.
+### 3.4 Context Broker & Graph Router (`neural_context/router.py`)
+- **Context Broker Orchestration**:
+  1. *Phase 1*: Probes memory for target entities. If facts exist, builds domain ground-truth hints.
+  2. *Phase 2*: Enriches skill query with domain hints, retrieves BM25 shortlist, and selects the winning skill.
+  3. *Phase 3*: Injects winning skill procedure (frontmatter stripped) + active memory facts.
+- **Information-Weighted Graph Router (`GraphRouter`)**:
+  - Constructs a bipartite concept-skill network.
+  - Applies spreading activation (Personalized PageRank) from memory domain concepts and task capability seeds.
+  - Penalizes high-frequency hub tokens using Information Content / TF-IDF.
+  - Ambiguity Gate: If top candidates have close scores ($\Delta < \tau$), falls back to Host LLM (`ctx.llm`).
+  - Zero external API keys, 100% free and local, sub-millisecond execution.
+- **Adaptive Token Optimization**: Dynamically bounds injected context (`max_context_tokens`, default: 2,500) with surgical line pruning at step boundaries to preserve complete technical workflows without arbitrary truncations.
 - **Workspace Sovereignty**: Sovereign workspace skills (`AGENTS.md` and `.skills/`) take priority over global fleet skills.
 
 ### 3.5 Verifiable Audit Receipts (`neural_context/receipt.py`)
 - **Location**: Written to `<plugin_data_dir>/receipts.jsonl`.
-- **Payload (`ReceiptRecord`)**: Records `turn_id`, `session_id`, `timestamp`, `is_task`, `entities_detected`, `selected_skill`, `skill_injected_tokens`, `memory_injected_tokens`, `tokens_saved_estimate`, `triage_latency_ms`, `status`.
+- **Payload (`ReceiptRecord`)**: Records `turn_id`, `session_id`, `platform` (CLI, Telegram, Discord, WhatsApp, Desktop), `model` (active host model), `timestamp`, `is_task`, `entities_detected`, `selected_skill`, `skill_injected_tokens`, `memory_injected_tokens`, `tokens_saved_estimate`, `triage_latency_ms`, `status`.
 - **CLI Commands**:
   - `hermes neural-context status`: Overall summary.
   - `hermes neural-context doctor`: System health and permissions check.

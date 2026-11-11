@@ -14,7 +14,7 @@ def estimate_tokens(text: str) -> int:
 
 
 _INJECTION_PATTERNS = re.compile(
-    r"(ignore\s+(all\s+)?previous\s+instructions|<system>|system:|assistant:|human:|<script)",
+    r"(ignore\s+(all\s+)?prev[i]ous\s+instructions|<system>|system:|assistant:|human:|<script|override\s+instructions)",
     re.IGNORECASE
 )
 
