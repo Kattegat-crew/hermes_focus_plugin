@@ -101,7 +101,7 @@ In production LLM agent environments, context provisioning faces compound scalin
 
 ### Install into Hermes Agent
 ```bash
-hermes plugins install Kattegat-crew/neural-context-plugin
+hermes plugins install Kattegat-crew/hermes_focus_plugin
 ```
 
 ### CLI Subcommands

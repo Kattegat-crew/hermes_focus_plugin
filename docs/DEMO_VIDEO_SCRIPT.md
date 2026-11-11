@@ -84,7 +84,7 @@
 ### Audio / Voiceover
 > *"Universal adaptability across standard Hermes Markdown and SQLite stores, 35 unit tests passing, and 100% compliant with official Hermes plugin standards.*
 > 
-> *Give your agent surgical context. Install it today with `hermes plugins install Kattegat-crew/neural-context-plugin`."*
+> *Give your agent surgical context. Install it today with `hermes plugins install Kattegat-crew/hermes_focus_plugin`."*
 
 ---
 
@@ -124,7 +124,7 @@
 ### Escena 4: Adaptabilidad Universal y Cierre (01:08 - 01:25)
 > *"Adaptable tanto al estándar de Markdown de Hermes como a almacenes SQLite, con 35 pruebas unitarias verificadas y validación oficial aprobada al 100%.*
 > 
-> *Dale a tu agente contexto quirúrgico. Instálalo hoy con `hermes plugins install Kattegat-crew/neural-context-plugin`."*
+> *Dale a tu agente contexto quirúrgico. Instálalo hoy con `hermes plugins install Kattegat-crew/hermes_focus_plugin`."*
 
 ---
 
@@ -148,9 +148,9 @@ Focus intercepts turns before inference:
 15/15 Hermes plugin validation checks passed. 35/35 unit tests green.
 
 Install now:
-hermes plugins install Kattegat-crew/neural-context-plugin
+hermes plugins install Kattegat-crew/hermes_focus_plugin
 
-GitHub: https://github.com/Kattegat-crew/neural-context-plugin
+GitHub: https://github.com/Kattegat-crew/hermes_focus_plugin
 
 #HermesAgent #NousResearch #AI #AgenticAI #OpenSource #ContextEngineering #Focus
 ```

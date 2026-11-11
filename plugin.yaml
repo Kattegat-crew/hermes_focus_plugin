@@ -8,7 +8,7 @@ description: >-
   ingests memory, and injects winning skills in a single step with zero KV-cache mutation.
 author: Jesús Díaz & NeuralCrew Labs
 license: MIT
-homepage: https://github.com/Kattegat-crew/neural-context-plugin
+homepage: https://github.com/Kattegat-crew/hermes_focus_plugin
 requires_hermes: ">=0.21.6"
 kind: standalone
 tags:

@@ -1,6 +1,6 @@
-# AGENTS.md — Standards, SDD Lifecycle & Skills Contract (`neural-context-plugin`)
+# AGENTS.md — Standards, SDD Lifecycle & Skills Contract (`hermes_focus_plugin`)
 
-This document governs all agentic development (Hermes fleet, Claude Code, Codex, Antigravity/Toallín, OpenCode) on the **`neural-context-plugin`** repository (`/opt/neural-context-plugin`).
+This document governs all agentic development (Hermes fleet, Claude Code, Codex, Antigravity/Toallín, OpenCode) on the **`hermes_focus_plugin`** repository (`/opt/neural-context-plugin`).
 
 ---
 

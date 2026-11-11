@@ -125,7 +125,7 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
         if result.combined_context_block:
             return {"context": result.combined_context_block}
     except Exception as exc:
-        logger.warning("neural-context-plugin pre_llm_call error (fail-closed): %s", exc)
+        logger.warning("focus pre_llm_call error (fail-closed): %s", exc)
 
     return None
 
@@ -161,7 +161,7 @@ def on_post_llm_call(response: Any = None, **kwargs: Any) -> None:
             model=model_name
         )
     except Exception as exc:
-        logger.warning("neural-context-plugin post_llm_call receipt error: %s", exc)
+        logger.warning("focus post_llm_call receipt error: %s", exc)
 
 
 def register(ctx: Any) -> None:

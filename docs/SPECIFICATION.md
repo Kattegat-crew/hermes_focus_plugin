@@ -236,7 +236,7 @@ Every turn intercepted by the plugin produces a deterministic, verifiable JSON a
 
 ## 6. Hackathon Deliverables Checklist (Cierre: 11-Nov 17:00 Bogotá)
 
-- [x] Dedicated Git Repository: [`/opt/neural-context-plugin`](file:///opt/neural-context-plugin) (`git@github.com:Kattegat-crew/neural-context-plugin.git`).
+- [x] Dedicated Git Repository: [`/opt/neural-context-plugin`](file:///opt/neural-context-plugin) (`git@github.com:Kattegat-crew/hermes_focus_plugin.git`).
 - [x] Core Python Package: `neural_context` (`sidecar.py`, `triage.py`, `router.py`, `memory.py`, `receipt.py`, `cli.py`, `config.py`, `models.py`).
 - [x] Hermes Plugin Wrapper: `plugin.yaml`, `__init__.py` (registers `pre_llm_call`, `post_llm_call`, `focus` CLI, and `focus_status` / `focus_route` tools).
 - [x] Pytest Suite: 35 deterministic unit tests (100% passing) covering cognitive triage, 4-quadrant routing, universal memory adaptability (Markdown & SQLite), sidecar BM25, and CLI diagnostics (including interactive config).
