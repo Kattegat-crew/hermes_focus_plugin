@@ -79,7 +79,7 @@ class GraphRouter(SkillRouterBackend):
 
         for c, _ in candidates:
             raw_text = f"{c.name} {c.description} {c.lead_paragraph}".lower()
-            tokens = re.findall(r"[a-zA-Z0-9_-]{3,}", raw_text)
+            tokens = re.findall(r"[\w-]{3,}", raw_text, re.UNICODE)
             total = len(tokens) or 1
             freqs: Dict[str, int] = {}
             for t in tokens:

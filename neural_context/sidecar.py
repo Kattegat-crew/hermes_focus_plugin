@@ -16,7 +16,7 @@ def compute_sha256(content: str) -> str:
 
 
 def tokenize(text: str) -> List[str]:
-    return [w.lower() for w in re.findall(r"\b[a-zA-Z0-9_\-]{2,}\b", text)]
+    return [w.lower() for w in re.findall(r"\b[\w\-]{2,}\b", text, re.UNICODE)]
 
 
 def extract_frontmatter_and_lead(content: str) -> Tuple[str, str]:
