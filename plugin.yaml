@@ -36,8 +36,8 @@ config_schema:
     default: true
   router_backend:
     type: str
-    default: "host_llm"
-    description: "Router engine: 'host_llm' (uses user active model with graph fallback), 'graph' (100% free graph-theoretic semantic router), or 'jev'"
+    default: "graph"
+    description: "Router engine: 'graph' (default, 100% free graph-theoretic Personalized PageRank semantic router) or 'host_llm' (uses user active model with graph fallback)"
   max_context_tokens:
     type: int
     default: 0
@@ -60,4 +60,4 @@ config_schema:
     default: ""
   timeout_ms:
     type: int
-    default: 250
+    default: 8000

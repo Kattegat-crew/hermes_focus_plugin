@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .memory import estimate_tokens
 from .models import ReceiptRecord, RouteResult, TriageAnalysis
 
 
@@ -49,7 +50,7 @@ class ReceiptEmitter:
             selected_skill=route_result.selected_skill.name if route_result.selected_skill else None,
             suggested_missing_skill=route_result.suggested_missing_skill,
             skill_is_project_local=route_result.selected_skill.is_project_local if route_result.selected_skill else False,
-            skill_injected_tokens=len((route_result.injected_skill_content or "").split()),
+            skill_injected_tokens=estimate_tokens(route_result.injected_skill_content or "") if route_result.injected_skill_content else 0,
             router_backend=route_result.router_backend,
             triage_latency_ms=route_result.triage_latency_ms,
             tokens_saved_estimate=route_result.tokens_saved_estimate,

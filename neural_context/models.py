@@ -22,8 +22,8 @@ class CognitiveRoute(str, Enum):
 
 class MemoryProbe(BaseModel):
     """
-    Targeted probe for selective factual memory retrieval preserved in the user's native language.
-    Language-agnostic: does NOT force artificial translations.
+    Targeted probe for selective factual memory retrieval across any Hermes-supported language.
+    Preserves interaction-language terms while optionally bridging cross-lingual terms and temporal bounds.
     """
     entity: Optional[str] = Field(
         default=None,
@@ -37,13 +37,25 @@ class MemoryProbe(BaseModel):
         default=None,
         description="Temporal reference in the native language (e.g. yesterday, last sprint, previous turn)."
     )
+    time_window_hours: Optional[int] = Field(
+        default=None,
+        description="Language-agnostic lookback window in hours inferred from time_anchor (e.g. 48 for yesterday, 168 for last week), or null."
+    )
+    recency_bias: bool = Field(
+        default=False,
+        description="True when the request asks for the latest/most recent facts or history even without an exact hour bound."
+    )
     query_text: str = Field(
         default="",
         description="Search phrase preserved in the interaction language for lexical/semantic memory matching."
     )
+    cross_lingual_terms: List[str] = Field(
+        default_factory=list,
+        description="Equivalent high-entropy search terms in canonical English and active Hermes locale when different from the interaction language."
+    )
     detected_language: str = Field(
         default="auto",
-        description="ISO language code of interaction (e.g. 'es', 'en', 'fr')."
+        description="BCP-47/ISO language code detected from the interaction, or 'auto'."
     )
 
 
@@ -192,6 +204,7 @@ class MemoryItem(BaseModel):
 
 class RouteResult(BaseModel):
     selected_skill: Optional[SkillCandidate] = None
+    selected_skills: List[SkillCandidate] = Field(default_factory=list)
     injected_skill_content: Optional[str] = None
     selected_memories: List[MemoryItem] = Field(default_factory=list)
     combined_context_block: Optional[str] = None

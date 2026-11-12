@@ -14,7 +14,7 @@ from .models import (
     SkillCandidate,
     TriageAnalysis,
 )
-from .router import ContextCoordinator, FastHeuristicRouter, GraphRouter, HostLLMRouter, JevRouter, SkillRouterBackend
+from .router import ContextCoordinator, FastHeuristicRouter, GraphRouter, HostLLMRouter, SkillRouterBackend
 from .sidecar import SidecarIndex
 from .triage import CognitiveTriage
 
@@ -34,6 +34,5 @@ __all__ = [
     "FastHeuristicRouter",
     "GraphRouter",
     "HostLLMRouter",
-    "JevRouter",
     "ContextCoordinator",
 ]

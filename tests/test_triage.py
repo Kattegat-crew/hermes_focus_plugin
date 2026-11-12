@@ -81,14 +81,18 @@ def test_triage_software_task_with_governance_detection():
     assert result.needs_skills is True
 
 
-def test_triage_offline_grammatical_induction():
-    # When no model is provided (e.g. offline fallback), tests structural fallback
+def test_triage_offline_fails_closed_to_direct_reply():
+    # When no model is provided (e.g. offline), triage must never guess intent via regexes;
+    # it must fail closed to DIRECT_REPLY with zero context injected.
+    from neural_context.models import CognitiveRoute
+
     triage = CognitiveTriage()
     result = triage.analyze("Escribe un informe de auditoría para el cliente 'AcmeCorp'")
 
-    assert result.is_actionable_task is True
-    assert "AcmeCorp" in result.extracted_entities
-    assert result.needs_skills is True
+    assert result.route == CognitiveRoute.DIRECT_REPLY
+    assert result.is_actionable_task is False
+    assert result.needs_skills is False
+    assert result.needs_memory is False
 
 
 def test_triage_multidimensional_memory_framework():

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import sys
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -62,62 +60,11 @@ def _coerce_and_validate(key: str, val: str) -> Tuple[Optional[Any], Optional[st
         except ValueError:
             return None, f"Invalid value for '{key}': expected integer, got '{val}'"
     elif expected_type is str:
-        if key == "router_backend" and val not in ("host_llm", "graph", "heuristic", "jev"):
-            return None, f"Invalid backend '{val}': choose from 'host_llm', 'graph', 'jev'"
+        if key == "router_backend" and val not in ("host_llm", "graph", "heuristic"):
+            return None, f"Invalid backend '{val}': choose from 'host_llm', 'graph'"
         return val, None
 
     return val, None
-
-
-def _safe_load_yaml(path: Path) -> dict:
-    if not path.is_file():
-        return {}
-    try:
-        import yaml
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except ImportError:
-        pass
-
-    try:
-        from ruamel.yaml import YAML
-        y = YAML(typ="safe")
-        with open(path, "r", encoding="utf-8") as f:
-            return y.load(f) or {}
-    except ImportError:
-        pass
-
-    return {}
-
-
-def _safe_dump_yaml(path: Path, data: dict) -> None:
-    try:
-        import yaml
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, default_flow_style=False)
-        return
-    except ImportError:
-        pass
-
-    try:
-        from ruamel.yaml import YAML
-        y = YAML()
-        with open(path, "w", encoding="utf-8") as f:
-            y.dump(data, f)
-        return
-    except ImportError:
-        pass
-
-    # Simple line-oriented YAML dumper fallback if no YAML library is present
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("# Focus plugin configuration\n")
-        plugins = data.get("plugins", {})
-        entries = plugins.get("entries", {})
-        focus_cfg = entries.get("focus", {})
-        settings = focus_cfg.get("settings", {})
-        f.write("plugins:\n  entries:\n    focus:\n      settings:\n")
-        for k, v in settings.items():
-            f.write(f"        {k}: {json.dumps(v)}\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -130,7 +77,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarIndex, receipt_emitter: ReceiptEmitter) -> int:
+def handle_cli(
+    args: argparse.Namespace,
+    config: PluginConfig,
+    sidecar: SidecarIndex,
+    receipt_emitter: ReceiptEmitter,
+    ctx: Any = None,
+) -> int:
+    if isinstance(args, (list, tuple)):
+        args = build_parser().parse_args(list(args))
     cmd = getattr(args, "subcommand", None) or "status"
 
     if cmd == "status":
@@ -160,10 +115,6 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
         # 2. Check indexed skills
         if sidecar.n_docs == 0:
             problems.append("Sidecar index is empty (0 skills indexed). Run `index` subcommand.")
-
-        # 3. Check router configuration
-        if config.router_backend == "jev" and not config.jev_api_key:
-            problems.append("Router backend is 'jev' but TYPESAFE_API_KEY is not set.")
 
         for p in problems:
             print(f"  [ERROR] {p}")
@@ -213,19 +164,14 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
                 print(f"[ERROR] {err}")
                 return 1
 
+            if ctx is None or not hasattr(ctx, "set_config"):
+                print("[ERROR] Cannot persist configuration: active Hermes plugin context (ctx.set_config) is required.")
+                return 1
+
             try:
-                hermes_home = get_hermes_home()
-                cfg_path = hermes_home / "config.yaml"
-                raw_cfg = _safe_load_yaml(cfg_path)
-
-                plugins = raw_cfg.setdefault("plugins", {})
-                entries = plugins.setdefault("entries", {})
-                nc = entries.setdefault("focus", {})
-                settings = nc.setdefault("settings", {})
-
-                settings[key] = coerced
-                _safe_dump_yaml(cfg_path, raw_cfg)
-                print(f"Successfully updated '{key}' to {coerced} in {cfg_path}")
+                ctx.set_config(key, coerced)
+                setattr(config, key, coerced)
+                print(f"Successfully updated '{key}' to {coerced}")
                 return 0
             except Exception as e:
                 print(f"[ERROR] Could not update config: {e}")
@@ -234,7 +180,7 @@ def handle_cli(args: argparse.Namespace, config: PluginConfig, sidecar: SidecarI
         print("=== Focus Configuration Settings ===")
         print(f"  enabled                     : {config.enabled} (Active state)")
         print(f"  pre_hook_enabled            : {config.pre_hook_enabled} (pre_llm_call interception)")
-        print(f"  router_backend              : {config.router_backend} (host_llm | graph | jev)")
+        print(f"  router_backend              : {config.router_backend} (host_llm | graph)")
         print(f"  max_context_tokens          : {config.max_context_tokens} (0 = unlimited / unconstrained)")
         print(f"  memory_token_budget         : {config.memory_token_budget} (0 = unlimited / unconstrained)")
         print(f"  selective_memory_enabled    : {config.selective_memory_enabled} (Recall domain facts)")

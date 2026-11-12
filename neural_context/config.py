@@ -44,17 +44,14 @@ def get_hermes_language() -> str:
 class PluginConfig(BaseModel):
     enabled: bool = True
     pre_hook_enabled: bool = True
-    router_backend: str = "host_llm"
+    router_backend: str = "graph"
     max_context_tokens: int = 0  # 0 = unlimited by default, preserves full procedural depth
     selective_memory_enabled: bool = True
     memory_token_budget: int = 0  # 0 = unlimited by default, preserves all relevant facts
     software_inspection_enabled: bool = True
     sidecar_db_path: str = ""
     receipts_path: str = ""
-    timeout_ms: int = 250
-    jev_api_key: Optional[str] = None
-    jev_base_url: str = "https://api.typesafe.ai"
-    jev_model: str = "jev-latest"
+    timeout_ms: int = 8000
 
     @classmethod
     def load_from_ctx(cls, ctx: Any = None) -> PluginConfig:
@@ -66,8 +63,7 @@ class PluginConfig(BaseModel):
             fields = [
                 "enabled", "pre_hook_enabled", "router_backend", "max_context_tokens",
                 "selective_memory_enabled", "memory_token_budget", "software_inspection_enabled",
-                "sidecar_db_path", "receipts_path", "timeout_ms", "jev_api_key",
-                "jev_base_url", "jev_model"
+                "sidecar_db_path", "receipts_path", "timeout_ms",
             ]
             for f in fields:
                 default_val = getattr(default_inst, f)
@@ -79,11 +75,6 @@ class PluginConfig(BaseModel):
                         config_data[f] = default_val
                 except Exception:
                     config_data[f] = default_val
-
-        # Environment variable overrides
-        jev_key = os.environ.get("TYPESAFE_API_KEY") or os.environ.get("NEURAL_CONTEXT_JEV_KEY")
-        if jev_key:
-            config_data["jev_api_key"] = jev_key
 
         data_dir = get_plugin_data_dir()
 

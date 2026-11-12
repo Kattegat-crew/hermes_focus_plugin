@@ -60,10 +60,8 @@ def test_cli_status(tmp_path, capsys):
     assert "Skills Indexed" in captured.out
 
 
-def test_cli_config_view_and_set(tmp_path, capsys, monkeypatch):
-    hermes_home = tmp_path / "hermes_home"
-    hermes_home.mkdir()
-    monkeypatch.setattr("neural_context.cli.get_hermes_home", lambda: hermes_home)
+def test_cli_config_view_and_set(tmp_path, capsys):
+    from unittest.mock import MagicMock
 
     config = PluginConfig(max_context_tokens=0, memory_token_budget=0)
     args = argparse.Namespace(subcommand="config", set=None)
@@ -73,12 +71,17 @@ def test_cli_config_view_and_set(tmp_path, capsys, monkeypatch):
     assert "Focus Configuration Settings" in captured.out
     assert "max_context_tokens" in captured.out
 
-    # Test setting a parameter via CLI
+    # Test setting a parameter via CLI using ctx.set_config
+    mock_ctx = MagicMock()
     args_set = argparse.Namespace(subcommand="config", set="max_context_tokens=1500")
-    ret_set = handle_cli(args_set, config, None, None)
+    ret_set = handle_cli(args_set, config, None, None, ctx=mock_ctx)
     assert ret_set == 0
     captured_set = capsys.readouterr()
     assert "Successfully updated 'max_context_tokens' to 1500" in captured_set.out
-    cfg_file = hermes_home / "config.yaml"
-    assert cfg_file.is_file()
-    assert "max_context_tokens: 1500" in cfg_file.read_text(encoding="utf-8")
+    mock_ctx.set_config.assert_called_once_with("max_context_tokens", 1500)
+    assert config.max_context_tokens == 1500
+
+    # Without ctx.set_config, it fails closed without touching disk
+    ret_no_ctx = handle_cli(args_set, config, None, None, ctx=None)
+    assert ret_no_ctx == 1
+    assert "ctx.set_config" in capsys.readouterr().out

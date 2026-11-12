@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Validation](https://img.shields.io/badge/hermes%20plugins%20validate-15%2F15%20passing-brightgreen.svg)]()
 [![Doctor](https://img.shields.io/badge/hermes%20plugins%20doctor-healthy-brightgreen.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-48%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-60%20passed-brightgreen.svg)]()
 
 > **Cognitive context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
 
@@ -85,14 +85,14 @@ In production LLM agent environments, context provisioning faces compound scalin
 
 ## Key Differentiators
 
-- **Cognitive Arbiter (4 Quadrants)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`. Casual conversational turns exit immediately with 0 tokens injected. In local graph mode execution takes $<5\text{ ms}$; in host LLM mode intent classification executes via the active model provider (3–8s for reasoning models with thought tokens; 200–500ms for lightweight models) with zero intermediate third-party routing proxies.
-- **Universal Memory Adaptability**: Works out of the box with standard vanilla Hermes Markdown (`MEMORY.md`, `USER.md`, `PROJECT_MEMORY.md`, `memories/**/*.md`), supports custom directory configurations (`HERMES_MEMORY_DIR`), and provides read-only probing for SQLite stores (`memories.db`, `state.db`) without locking or schema dependencies.
-- **Preserves Full Context by Default**: Does not enforce artificial token ceilings by default (`0` = unlimited). Procedural depth and domain facts are fully preserved, with optional user-configurable budgets for smaller models.
+- **Cognitive Arbiter (4 Quadrants)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`. Casual conversational turns exit immediately with 0 tokens injected. In local graph mode execution takes $<5\text{ ms}$; in host LLM mode intent classification executes via the active model provider with zero intermediate third-party routing proxies.
+- **Sequential Two-Phase Grounding**: Always queries memory and history databases *before* skill routing. Discovered architectural facts and entity tech stacks dynamically enrich and boost (1.35x) the semantic search query for procedural skills.
+- **Symmetric Bipartite Personalized PageRank**: Unifies multi-hop concept discovery across both procedural skills (`GraphRouter`) and historical session databases (`SelectiveMemoryRetriever`). Propagates activation across entity seeds and discriminative bridge concepts without cross-topic contamination.
+- **Universal Multilingual Coverage**: 100% open to all Hermes-supported locales and scripts (Latin, Cyrillic, CJK, Arabic, Hebrew, Greek, Thai, Indic, etc.). Employs continuous mathematical Unicode properties, cluster-density n-grams, and casefold normalization without closed language lists or hardcoded script heuristics.
+- **Adaptive Execution & Dynamic Budgets**: Eliminates static limits and artificial truncations. Token limits and deadlines adapt dynamically based on prompt complexity and model reasoning demands. In case of output truncation by reasoning models, an adaptive retry doubles headroom up to 12,000 tokens within a safe execution window.
 - **Zero KV-Cache Mutation**: Injects context exclusively into the ephemeral user message turn. The System Prompt remains byte-stable, maximizing prompt cache hits and minimizing latency.
-- **Single-Step Procedural Ingestion**: Directly provides the winning skill body, eliminating the multi-turn latency and context resending of secondary search tools.
-- **Information-Weighted Graph Routing**: Uses bipartite concept spreading activation in memory to resolve multi-hop relationships (e.g. project codename $\to$ tech stack $\to$ matching skill) with zero external API dependencies.
-- **Skill Gap Detection**: When an actionable task genuinely requires a capability absent from the catalog, the arbiter avoids false positive injections and returns an explicit capability notice.
-- **Zero File Mutation**: User skill repositories and profile files are never altered. Metadata is cached in a local SQLite sidecar (`sidecar_index.db`) keyed by SHA-256 hashes.
+- **Zero Duplication of Default System Memory**: Leaves default Hermes memory files (`MEMORY.md`, `USER.md`, `SOUL.md`, `AGENTS.md`) untouched so they are never duplicated in context. Inspects Hermes `state.db` (excluding active `session_id`), `engram.db`, and external SQL databases.
+- **Atomic Hermes Host Persistence**: Implements `ctx.set_config` for safe, atomic configuration updates in compliance with Hermes plugin lifecycle contracts.
 - **Auditable Receipts**: Emits structured JSON records to `receipts.jsonl` tracking route decisions, injected tokens, latency, and model provenance.
 
 ---
@@ -135,12 +135,12 @@ plugins:
     focus:
       enabled: true
       settings:
-        router_backend: "host_llm"      # "host_llm" (default, uses ctx.llm) | "graph" | "jev"
+        router_backend: "graph"         # "graph" (default, bipartite Personalized PageRank) | "host_llm"
         max_context_tokens: 0           # 0 for unlimited (default, preserves full procedural depth)
         memory_token_budget: 0          # 0 for unlimited (default, preserves all matching facts)
         selective_memory_enabled: true  # Surgical memory probing based on extracted entities
         software_inspection_enabled: true
-        timeout_ms: 250
+        timeout_ms: 8000
 ```
 
 ---
@@ -148,7 +148,7 @@ plugins:
 ## Security & Fail-Closed Boundaries
 
 - **Untrusted Context Encapsulation**: Injected skills and memory facts are wrapped in strict `<neural_context>` XML tags with explicit procedural scoping, ensuring retrieved third-party text cannot hijack model persona or execute unauthorized commands.
-- **Strict Fail-Closed Architecture**: If parsing, network routing, or sidecar lookup exceeds the timeout deadline (default: 250ms) or encounters an error, the engine defaults safely to `DIRECT_REPLY` with zero context injected. The user turn proceeds normally without interruption.
+- **Strict Fail-Closed Architecture**: If parsing, network routing, or sidecar lookup exceeds the timeout deadline (default: 8000ms) or encounters an error, the engine defaults safely to `DIRECT_REPLY` with zero context injected. The user turn proceeds normally without interruption.
 - **Zero File Mutation**: User `SKILL.md` catalogs and workspace files are strictly immutable. Content hashes and procedural descriptions are stored in a local SQLite sidecar (`sidecar_index.db`).
 - **Read-Only Memory Sandboxing**: Memory scans enforce strict directory allowlists, symlink boundary checks, and escaped wildcard queries (`ESCAPE '\'`), preventing directory traversal or query injection.
 
@@ -157,7 +157,7 @@ plugins:
 ## Verification & Tests
 
 ```bash
-# Run pytest test suite (48 passing tests)
+# Run pytest test suite (60 passing tests)
 pytest -v
 
 # Run official Hermes Plugin validation (15/15 checks passed)

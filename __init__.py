@@ -41,6 +41,7 @@ _receipt_emitter: Optional[ReceiptEmitter] = None
 
 # Thread-safe / session-isolated store for turn state: key -> (TriageAnalysis, RouteResult, platform, model)
 _session_turns: Dict[str, Tuple[TriageAnalysis, RouteResult, str, str]] = {}
+_synced_cwds: set[str] = set()
 
 
 def extract_message_text(user_message: Any) -> str:
@@ -110,19 +111,25 @@ def discover_all_skill_paths(hermes_home: Path, cwd: Optional[Path] = None) -> T
 
 
 def _get_services(ctx: Any = None):
-    global _config, _sidecar, _triage, _coordinator, _receipt_emitter
+    global _config, _sidecar, _triage, _coordinator, _receipt_emitter, _synced_cwds
     if _config is None:
         _config = PluginConfig.load_from_ctx(ctx)
+    cwd_raw = getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
+    cwd_p = Path(cwd_raw).resolve() if cwd_raw else None
     if _sidecar is None:
         _sidecar = SidecarIndex(db_path=_config.sidecar_db_path)
-        # Initial scan if index is empty
         if _sidecar.n_docs == 0:
-            cwd_raw = getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
-            cwd_p = Path(cwd_raw) if cwd_raw else None
             g_paths, l_paths = discover_all_skill_paths(get_hermes_home(), cwd=cwd_p)
             _sidecar.sync_skills(g_paths + l_paths, project_local_paths=l_paths)
+            if cwd_p:
+                _synced_cwds.add(str(cwd_p))
+    if cwd_p and str(cwd_p) not in _synced_cwds and _sidecar is not None:
+        _synced_cwds.add(str(cwd_p))
+        _, l_paths = discover_all_skill_paths(Path("/nonexistent"), cwd=cwd_p)
+        if l_paths:
+            _sidecar.sync_skills(l_paths, project_local_paths=l_paths)
     if _triage is None:
-        _triage = CognitiveTriage(ctx=ctx)
+        _triage = CognitiveTriage(ctx=ctx, timeout_ms=_config.timeout_ms)
     if _coordinator is None:
         _coordinator = ContextCoordinator(config=_config, sidecar=_sidecar, ctx=ctx)
     if _receipt_emitter is None:
@@ -160,7 +167,7 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
         cwd = kwargs.get("cwd") or getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
         analysis = triage.analyze(text, cwd=cwd)
-        result = coordinator.execute(analysis, user_message=text, cwd=cwd)
+        result = coordinator.execute(analysis, user_message=text, cwd=cwd, session_id=session_id or None)
 
         # Store session/turn state isolated from concurrent sessions (bounded to 256 entries)
         if len(_session_turns) >= 256:
@@ -261,7 +268,11 @@ def register(ctx: Any) -> None:
             cwd = getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
             analysis = triage.analyze(query, cwd=cwd)
             result = coordinator.execute(analysis, user_message=query, cwd=cwd)
-            selected = result.selected_skill.name if result.selected_skill else "None"
+            selected = (
+                ", ".join(s.name for s in result.selected_skills)
+                if result.selected_skills
+                else (result.selected_skill.name if result.selected_skill else "None")
+            )
             return f"Route Result -> Winner: {selected} | Latency: {result.triage_latency_ms:.1f}ms | Status: {result.status}"
 
         route_schema = {
@@ -291,7 +302,7 @@ def register(ctx: Any) -> None:
 
         def cli_handler_fn(args: Any) -> int:
             cfg, sidecar, _, _, receipt_emitter = _get_services(ctx)
-            return handle_cli(args, cfg, sidecar, receipt_emitter)
+            return handle_cli(args, cfg, sidecar, receipt_emitter, ctx=ctx)
 
         ctx.register_cli_command(
             name="focus",
