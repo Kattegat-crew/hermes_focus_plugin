@@ -304,4 +304,3 @@ def is_instruction_line(line: str) -> bool:
 
 def is_skill_header(line: str) -> bool:
     return any(line.startswith(prefix) for prefix in SKILL_HEADER_PREFIXES)
-
