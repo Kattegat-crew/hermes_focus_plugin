@@ -27,9 +27,32 @@ from neural_context.sidecar import SidecarIndex, discover_skill_inventory
 from neural_context.triage import CognitiveTriage
 
 PLUGIN_NAME = "focus"
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.1.1"
 
 logger = logging.getLogger(PLUGIN_NAME)
+
+
+def _ctx_cwd(ctx: Any) -> Optional[str]:
+    """Resolve the session working directory from a Hermes PluginContext.
+
+    Hermes exposes ``PluginContext.session_cwd`` as a *method* (``ctx.session_cwd()``); a plain
+    ``getattr`` therefore returns a bound method, and passing that into ``Path()`` raised
+    ``TypeError`` — which made every ``pre_llm_call`` hook fail closed, so nothing was ever
+    injected when running inside a real Hermes runtime.
+    """
+    for attr in ("session_cwd", "cwd"):
+        value = getattr(ctx, attr, None)
+        if value is None:
+            continue
+        if callable(value):
+            try:
+                value = value()
+            except Exception:
+                continue
+        if isinstance(value, (str, Path)) and str(value).strip():
+            return str(value)
+    return None
+
 
 # Shared singleton instances per process
 _config: Optional[PluginConfig] = None
@@ -127,7 +150,7 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
 
     try:
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
-        cwd = kwargs.get("cwd") or getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None)
+        cwd = kwargs.get("cwd") or _ctx_cwd(ctx)
         analysis = triage.analyze(
             text, cwd=cwd, software_inspection_enabled=config.software_inspection_enabled
         )
@@ -229,7 +252,7 @@ def register(ctx: Any) -> None:
             if not query:
                 return "Error: query is required."
             _, _, triage, coordinator, _ = _get_services(ctx)
-            cwd = kw.get("cwd") or getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None)
+            cwd = kw.get("cwd") or _ctx_cwd(ctx)
             analysis = triage.analyze(
                 query, cwd=cwd, software_inspection_enabled=_config.software_inspection_enabled
             )

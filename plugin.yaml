@@ -25,7 +25,6 @@ provides_tools:
 provides_hooks:
   - pre_llm_call
   - post_llm_call
-provides_middleware: []
 requires_env: []
 config_schema:
   enabled:

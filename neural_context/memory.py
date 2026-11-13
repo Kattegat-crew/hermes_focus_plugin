@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -12,6 +13,24 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from .config import get_hermes_home
 from .models import MemoryItem, MemoryProbe
 from .sidecar import normalize_text_for_matching, term_information_weight, tokenize
+
+_log = logging.getLogger(__name__)
+
+
+def _quote_sql_identifier(preparer: Any, name: str) -> str:
+    """Quote a schema identifier on any SQLAlchemy version.
+
+    SQLAlchemy <2.1 accepts ``quote(ident, force=True)``; 2.1 removed ``force`` and only
+    exposes ``quote(ident)``. Names come from schema inspection (never from user input) but
+    may contain spaces, reserved words or mixed case, so quoting must not depend on the
+    installed version — a TypeError here used to be swallowed and silently disabled every
+    external-database memory read.
+    """
+    try:
+        return preparer.quote(name, force=True)
+    except TypeError:
+        return preparer.quote(name)
+
 
 
 def estimate_tokens(text: str) -> int:
@@ -1291,7 +1310,7 @@ class SelectiveMemoryRetriever:
             identifier_preparer = engine.dialect.identifier_preparer
 
             def _q_identifier(name: str) -> str:
-                return identifier_preparer.quote(name, force=True)
+                return _quote_sql_identifier(identifier_preparer, name)
 
             table_names = inspector.get_table_names()
             with engine.connect() as conn:
@@ -1360,8 +1379,12 @@ class SelectiveMemoryRetriever:
                         )
                         if node is not None:
                             nodes.append(node)
-        except Exception:
-            pass
+        except Exception as exc:  # una base externa caída nunca debe romper el turno
+            _log.debug(
+                "external DB memory adapter skipped (%s): %s",
+                db_uri.split(":", 1)[0],
+                exc,
+            )
         finally:
             if engine is not None:
                 try:
