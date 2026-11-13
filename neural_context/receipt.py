@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .i18n import is_instruction_line, is_memory_header, is_skill_header
 from .memory import estimate_tokens
 from .models import ReceiptRecord, RouteResult, TriageAnalysis
 
@@ -39,22 +40,32 @@ class ReceiptEmitter:
 
         rendered_block = route_result.combined_context_block or ""
         rendered_tokens = estimate_tokens(rendered_block) if rendered_block else 0
-        memory_marker = "## Historical Memory (Untrusted Facts)"
         memory_tokens = 0
-        if memory_marker in rendered_block:
-            memory_section = rendered_block.split(memory_marker, 1)[1].split("[Instruction:", 1)[0]
-            memory_tokens = estimate_tokens(memory_section)
-        skill_lines = []
+        memory_lines: List[str] = []
+        skill_lines: List[str] = []
         in_skill = False
+        in_memory = False
         for line in rendered_block.splitlines():
-            if line.startswith("## Active Procedural Guidance"):
+            if is_memory_header(line):
+                in_skill = False
+                in_memory = True
+                memory_lines.append(line)
+                continue
+            if is_instruction_line(line) or line.strip() == "</neural_context>":
+                in_skill = False
+                in_memory = False
+                continue
+            if is_skill_header(line):
                 in_skill = True
+                in_memory = False
                 skill_lines.append(line)
                 continue
-            elif line.startswith("## Historical Memory") or line.startswith("[Instruction:") or line == "</neural_context>":
-                in_skill = False
+            if in_memory:
+                memory_lines.append(line)
             elif in_skill:
                 skill_lines.append(line)
+        if memory_lines:
+            memory_tokens = estimate_tokens("\n".join(memory_lines))
         skill_tokens = estimate_tokens("\n".join(skill_lines)) if skill_lines else 0
 
         record = ReceiptRecord(

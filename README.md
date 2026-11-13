@@ -144,6 +144,15 @@ plugins:
         timeout_ms: 0               # 0 leaves timeout control to host/provider
 ```
 
+### Localized injected context
+
+Every string the plugin injects into the turn (the missing-skill notice, the untrusted-content
+instruction, and the memory/skill section headers) is rendered in the language of whoever runs it.
+Resolution order: the language detected in the interaction → `HERMES_LANGUAGE` or
+`display.language` → OS locale (`LC_ALL` / `LC_MESSAGES` / `LANGUAGE` / `LANG`) → English fallback.
+Bundled languages: en, es, pt, fr, it, de, nl, ru, uk, pl, tr, ja, zh, ko, ar, hi, id, sv, vi.
+Unknown or unsupported locales fall back to English instead of breaking the block.
+
 ---
 
 ## Security & Fail-Closed Boundaries
