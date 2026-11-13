@@ -42,3 +42,15 @@ receipts.jsonl
 # Agent local tooling artifacts
 .atl/
 .codegraph/
+
+# Runtime and test residue (never ship)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.jsonl
+.ruff_cache/
+.mypy_cache/
+*.orig
+*.rej
