@@ -48,8 +48,13 @@ def is_safe_memory_file(path: Path) -> bool:
                     return False
             except Exception:
                 pass
-        # Bound file size to 2 MB to prevent memory bloat
-        if resolved.is_file() and resolved.stat().st_size > 2_000_000:
+        # Text files are read in full, while SQLite stores are queried read-only.
+        # A database file size is not the amount of data materialized by a query.
+        if (
+            resolved.is_file()
+            and resolved.suffix.lower() not in {".db", ".sqlite", ".sqlite3"}
+            and resolved.stat().st_size > 2_000_000
+        ):
             return False
         return resolved.is_file()
     except Exception:
@@ -435,14 +440,6 @@ class SelectiveMemoryRetriever:
                 hermes_home / "engram.db",
                 hermes_home / ".engram" / "engram.db",
             ]
-            if hermes_home.parent.name == "profiles":
-                root_home = hermes_home.parent.parent
-                db_search_paths.extend([
-                    root_home / "state.db",
-                    root_home / "memories.db",
-                    root_home / "engram.db",
-                    root_home / ".engram" / "engram.db",
-                ])
             for dbp in db_search_paths:
                 if dbp.is_file() and is_safe_memory_file(dbp) and dbp not in sqlite_candidates:
                     sqlite_candidates.append(dbp)
@@ -998,6 +995,7 @@ class SelectiveMemoryRetriever:
         has_role = "role" in msg_cols
         has_session_id = "session_id" in msg_cols
         has_ts = "timestamp" in msg_cols
+        has_deleted_at = "deleted_at" in msg_cols
 
         where_clauses = ["m.content IS NOT NULL", "length(m.content) >= 10"]
         base_params: List[Any] = []
@@ -1005,6 +1003,8 @@ class SelectiveMemoryRetriever:
             where_clauses.append("m.role IN ('user', 'assistant')")
         if has_active:
             where_clauses.append("m.active = 1")
+        if has_deleted_at:
+            where_clauses.append("m.deleted_at IS NULL")
         if has_session_id and active_session_id:
             where_clauses.append("m.session_id != ?")
             base_params.append(active_session_id)
@@ -1119,10 +1119,12 @@ class SelectiveMemoryRetriever:
 
         col_names = [str(r[1]) for r in col_rows]
         col_types = [str(r[2] or "") for r in col_rows]
+        deleted_at_col = next((name for name in col_names if name.lower() == "deleted_at"), None)
+        active_row_filter = f' WHERE "{deleted_at_col.replace(chr(34), chr(34) * 2)}" IS NULL' if deleted_at_col else ""
 
         # Direct sample check: skip empty tables and profile actual column data distributions
         try:
-            cursor.execute(f'SELECT * FROM "{safe_tbl}" LIMIT 30')
+            cursor.execute(f'SELECT * FROM "{safe_tbl}"{active_row_filter} LIMIT 30')
             sample_rows = cursor.fetchall()
         except Exception:
             return nodes
@@ -1189,7 +1191,9 @@ class SelectiveMemoryRetriever:
                         sql = (
                             f'SELECT {t_select} FROM "{safe_tbl}" t '
                             f'JOIN "{safe_fts}" f ON f.rowid = t.rowid '
-                            f'WHERE "{safe_fts}" MATCH ?{t_order_sql} LIMIT {limit}'
+                            f'WHERE "{safe_fts}" MATCH ?'
+                            f'{(" AND t." + _qcol(deleted_at_col) + " IS NULL") if deleted_at_col else ""}'
+                            f'{t_order_sql} LIMIT {limit}'
                         )
                         cursor.execute(sql, (fts_query,))
                         rows = cursor.fetchall()
@@ -1207,7 +1211,8 @@ class SelectiveMemoryRetriever:
                 if where_parts:
                     sql = (
                         f'SELECT {", ".join(select_cols)} FROM "{safe_tbl}" '
-                        f'WHERE {" OR ".join(where_parts)}{order_sql} LIMIT {limit}'
+                        f'WHERE {active_row_filter[7:] + " AND " if active_row_filter else ""}'
+                        f'({" OR ".join(where_parts)}){order_sql} LIMIT {limit}'
                     )
                     try:
                         cursor.execute(sql, params)
@@ -1237,7 +1242,10 @@ class SelectiveMemoryRetriever:
         # Diacritic/script-tolerant fallback for small tables (< 300 rows) when SQL LIKE/FTS missed
         if not stage1_hit and not nodes:
             try:
-                cursor.execute(f'SELECT {", ".join(select_cols)} FROM "{safe_tbl}"{order_sql} LIMIT 300')
+                cursor.execute(
+                    f'SELECT {", ".join(select_cols)} FROM "{safe_tbl}"'
+                    f'{active_row_filter}{order_sql} LIMIT 300'
+                )
                 _collect_rows(cursor.fetchall())
             except Exception:
                 pass
@@ -1251,8 +1259,9 @@ class SelectiveMemoryRetriever:
         topic_terms: List[str],
     ) -> List[_MemoryFactNode]:
         """
-        Read-only adapter for external user-ecosystem databases configured via URI
+        SELECT-only adapter for external user-ecosystem databases configured via URI
         (sqlite:///..., postgresql://..., mysql://..., etc. via SQLAlchemy when available).
+        Database-enforced read-only access depends on the caller's URI credentials and server.
         Uses direct statistical sample profiling (zero static column/table name lists).
         """
         if db_uri.startswith("sqlite:///"):
@@ -1279,6 +1288,11 @@ class SelectiveMemoryRetriever:
         try:
             engine = create_engine(db_uri, pool_pre_ping=True)
             inspector = inspect(engine)
+            identifier_preparer = engine.dialect.identifier_preparer
+
+            def _q_identifier(name: str) -> str:
+                return identifier_preparer.quote(name, force=True)
+
             table_names = inspector.get_table_names()
             with engine.connect() as conn:
                 for tbl in table_names:
@@ -1287,8 +1301,11 @@ class SelectiveMemoryRetriever:
                         continue
                     col_names = [c["name"] for c in cols]
                     col_types = [str(c.get("type", "")) for c in cols]
+                    deleted_at_col = next((name for name in col_names if name.lower() == "deleted_at"), None)
 
-                    sample_res = conn.execute(text(f'SELECT * FROM "{tbl}" LIMIT 30'))
+                    q_table = _q_identifier(tbl)
+                    sample_filter = f' WHERE {_q_identifier(deleted_at_col)} IS NULL' if deleted_at_col else ""
+                    sample_res = conn.execute(text(f'SELECT * FROM {q_table}{sample_filter} LIMIT 30'))
                     sample_rows = [tuple(r) for r in sample_res.fetchall()]
                     if not sample_rows:
                         continue
@@ -1300,9 +1317,9 @@ class SelectiveMemoryRetriever:
                         continue
 
                     quoted_cols = (
-                        [f'"{c}"' for c in selected_cols]
-                        + ([f'"{ent_col}"'] if ent_col else [])
-                        + ([f'"{ts_col}"'] if ts_col else [])
+                        [_q_identifier(c) for c in selected_cols]
+                        + ([_q_identifier(ent_col)] if ent_col else [])
+                        + ([_q_identifier(ts_col)] if ts_col else [])
                     )
                     search_cols = list(selected_cols) + ([ent_col] if ent_col else [])
 
@@ -1313,16 +1330,17 @@ class SelectiveMemoryRetriever:
                         for scol in search_cols:
                             pname = f"p{p_idx}"
                             p_idx += 1
-                            like_clauses.append(f'CAST("{scol}" AS TEXT) LIKE :{pname}')
+                            like_clauses.append(f'CAST({_q_identifier(scol)} AS TEXT) LIKE :{pname}')
                             bind_params[pname] = f"%{term}%"
 
                     if not like_clauses:
                         continue
 
-                    order_sql = f' ORDER BY "{ts_col}" DESC' if ts_col else ""
+                    order_sql = f' ORDER BY {_q_identifier(ts_col)} DESC' if ts_col else ""
+                    active_filter = f' AND {_q_identifier(deleted_at_col)} IS NULL' if deleted_at_col else ""
                     stmt = text(
-                        f'SELECT {", ".join(quoted_cols)} FROM "{tbl}" '
-                        f'WHERE {" OR ".join(like_clauses)}{order_sql} LIMIT 120'
+                        f'SELECT {", ".join(quoted_cols)} FROM {q_table} '
+                        f'WHERE ({" OR ".join(like_clauses)}){active_filter}{order_sql} LIMIT 120'
                     )
                     res = conn.execute(stmt, bind_params)
                     n_content = len(selected_cols)
