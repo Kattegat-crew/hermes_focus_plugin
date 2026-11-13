@@ -112,7 +112,7 @@ def test_arbiter_route_q3_memory_only_multilingual(tmp_path):
     assert len(result.selected_memories) >= 1
     assert any("entrega de los endpoints de autenticacion" in m.fact for m in result.selected_memories)
     assert "<neural_context>" in result.combined_context_block
-    assert "Active Memory Facts" in result.combined_context_block
+    assert "Historical Memory (Untrusted Facts)" in result.combined_context_block
 
 
 def test_arbiter_route_q4_enriched_task(tmp_path):

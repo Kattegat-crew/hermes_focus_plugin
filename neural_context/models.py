@@ -173,6 +173,10 @@ class TriageAnalysis(BaseModel):
         default=False,
         description="True if model response was truncated due to max_tokens limit exhaustion."
     )
+    model_latency_ms: float = Field(
+        default=0.0,
+        description="Elapsed time spent in the cognitive model call, measured by this plugin.",
+    )
     error: Optional[str] = Field(
         default=None,
         description="Error details if cognitive interpretation failed or degraded."
@@ -212,7 +216,9 @@ class RouteResult(BaseModel):
     triage_analysis: Optional[TriageAnalysis] = None
     tokens_saved_estimate: int = 0
     triage_latency_ms: float = 0.0
-    router_backend: str = "host_llm"
+    coordination_latency_ms: float = 0.0
+    router_backend: Optional[str] = None
+    configured_router_backend: str = "host_llm"
     status: str = "success"
     message: str = ""
 
@@ -232,8 +238,13 @@ class ReceiptRecord(BaseModel):
     suggested_missing_skill: Optional[str] = None
     skill_is_project_local: bool = False
     skill_injected_tokens: int = 0
-    router_backend: str = "host_llm"
+    router_backend: Optional[str] = None
+    configured_router_backend: str = "host_llm"
     triage_latency_ms: float = 0.0
+    coordination_latency_ms: float = 0.0
+    model_latency_ms: float = 0.0
+    rendered_context_tokens: int = 0
+    context_overhead_tokens: int = 0
     tokens_saved_estimate: int = 0
     status: str = "success"
     error: Optional[str] = None
