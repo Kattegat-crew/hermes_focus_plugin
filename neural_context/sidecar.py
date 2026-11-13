@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
 import re
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .models import SkillCandidate
+
+logger = logging.getLogger(__name__)
 
 
 # Minimal non-decomposing Latin characters whose ASCII base cannot be derived via Unicode NFKD
@@ -284,6 +287,99 @@ def extract_frontmatter_and_lead(content: str) -> Tuple[str, str]:
     return description, lead_paragraph
 
 
+def discover_skill_inventory(include_project: bool = True):
+    """Return the active native skill catalog and its source provenance.
+
+    Native Hermes owns roots, project trust/quarantine, exclusions, and duplicate
+    precedence. If that contract is not importable, only the active profile's
+    skills directory is scanned; project sources are never guessed from cwd.
+    """
+    try:
+        from agent import skill_utils
+        required = (
+            "get_skill_search_roots", "iter_skill_index_files", "resolve_skill_catalog",
+            "parse_frontmatter", "TIER_PROJECT", "TIER_LOCAL", "TIER_CREATE_DIR", "TIER_EXTERNAL",
+            "get_disabled_skill_names", "is_disabled_entry", "skill_matches_platform",
+            "skill_matches_environment", "skill_matches_apps",
+        )
+        if not all(hasattr(skill_utils, name) for name in required):
+            raise ImportError("native Hermes skill discovery contract is incomplete")
+        roots = skill_utils.get_skill_search_roots(include_project=include_project)
+        entries = []
+        source_info = {}
+        project_paths = []
+        for tier, root in roots:
+            root = Path(root)
+            if not root.is_dir():
+                continue
+            if tier == skill_utils.TIER_PROJECT:
+                project_iter = getattr(skill_utils, "iter_project_skill_files", None)
+                if not callable(project_iter):
+                    raise ImportError("native project quarantine iterator is unavailable")
+                files = project_iter(root)
+            else:
+                files = skill_utils.iter_skill_index_files(root, "SKILL.md")
+            for path in files:
+                path = Path(path)
+                try:
+                    content = path.read_text(encoding="utf-8-sig")
+                    frontmatter, _ = skill_utils.parse_frontmatter(content)
+                except Exception:
+                    continue
+                name = str(frontmatter.get("name") or path.parent.name).strip()
+                if not name:
+                    continue
+                entry = {"name": name, "tier": tier, "root": root, "path": path}
+                try:
+                    offerable = (
+                        skill_utils.skill_matches_platform(frontmatter)
+                        and skill_utils.skill_matches_environment(frontmatter)
+                        and skill_utils.skill_matches_apps(frontmatter)
+                    )
+                except Exception:
+                    offerable = False
+                if not offerable:
+                    continue
+                entries.append(entry)
+                if tier == skill_utils.TIER_PROJECT:
+                    project_paths.append(path)
+        resolved = skill_utils.resolve_skill_catalog(entries)
+        disabled = skill_utils.get_disabled_skill_names()
+        selected = [
+            entry for entry in resolved
+            if entry.get("status") == "unique" or (
+                entry.get("status") == "ambiguous" and entry.get("load_name")
+            )
+            if not skill_utils.is_disabled_entry(entry, disabled)
+        ]
+        paths = [Path(entry["path"]) for entry in selected]
+        names = {Path(entry["path"]): str(entry.get("load_name") or entry["name"]) for entry in selected}
+        selected_info = {
+            Path(entry["path"]): (entry["tier"], Path(entry["root"]))
+            for entry in selected
+        }
+        selected_project = [path for path in paths if selected_info[path][0] == skill_utils.TIER_PROJECT]
+        tiers = {
+            skill_utils.TIER_PROJECT, skill_utils.TIER_LOCAL,
+            skill_utils.TIER_CREATE_DIR, skill_utils.TIER_EXTERNAL,
+        }
+        return paths, selected_project, selected_info, names, tiers
+    except Exception as exc:
+        # Keep the user's profile-level catalog available, but never approximate
+        # project trust, quarantine, or tier precedence with a raw workspace walk.
+        logger.warning("Native skill discovery unavailable; using profile skills only: %s", exc)
+        try:
+            from hermes_constants import get_skills_dir
+            root = Path(get_skills_dir())
+            iterator = getattr(locals().get("skill_utils"), "iter_skill_index_files", None)
+            paths = list(iterator(root, "SKILL.md")) if callable(iterator) and root.is_dir() else []
+        except Exception:
+            return [], [], {}, {}, {0, 1, 2, 3}
+        paths = [Path(path) for path in paths]
+        info = {path: (1, root) for path in paths}
+        return paths, [], info, {}, {0, 1, 2, 3}
+
+
 class SidecarIndex:
     """
     Lightweight SQLite-backed sidecar index and in-memory BM25 ranker.
@@ -317,60 +413,108 @@ class SidecarIndex:
                     lead_paragraph TEXT,
                     is_project_local INTEGER DEFAULT 0,
                     indexed_tokens INTEGER,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source_root TEXT NOT NULL DEFAULT '',
+                    source_tier INTEGER NOT NULL DEFAULT 1
                 )
             """)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(skills_sidecar)")}
+            if "source_root" not in columns:
+                conn.execute("ALTER TABLE skills_sidecar ADD COLUMN source_root TEXT NOT NULL DEFAULT ''")
+            if "source_tier" not in columns:
+                conn.execute("ALTER TABLE skills_sidecar ADD COLUMN source_tier INTEGER NOT NULL DEFAULT 1")
+                conn.execute("UPDATE skills_sidecar SET source_tier = CASE WHEN is_project_local = 1 THEN 0 ELSE 1 END")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_sha256 ON skills_sidecar(sha256)")
             conn.commit()
 
-    def sync_skills(self, skill_paths: List[Path], project_local_paths: Optional[List[Path]] = None) -> int:
+    def sync_skills(
+        self,
+        skill_paths: List[Path],
+        project_local_paths: Optional[List[Path]] = None,
+        *,
+        source_info: Optional[Dict[Path, Tuple[int, Path]]] = None,
+        skill_names: Optional[Dict[Path, str]] = None,
+        replace_tiers: Optional[set[int]] = None,
+        replace_subtrees: Optional[List[Path]] = None,
+    ) -> int:
         """
         Synchronizes skill metadata into SQLite index only when sha256 changes.
         Builds the in-memory BM25 index in sub-20ms.
         """
         project_paths_set = {str(p.resolve()) for p in (project_local_paths or [])}
         updated_count = 0
+        source_info = source_info or {}
+        skill_names = skill_names or {}
+        seen_names = set()
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             existing = {
-                row[0]: (row[1], row[2])  # name -> (sha256, is_local)
-                for row in cursor.execute("SELECT skill_name, sha256, is_project_local FROM skills_sidecar")
+                row[0]: (row[1], row[2], row[3], row[4], row[5])
+                for row in cursor.execute("SELECT skill_name, sha256, is_project_local, skill_path, source_root, source_tier FROM skills_sidecar")
             }
 
             for p in skill_paths:
                 if not p.is_file():
                     continue
-                skill_name = p.parent.name if p.name == "SKILL.md" else p.stem
+                skill_name = skill_names.get(p, p.parent.name if p.name == "SKILL.md" else p.stem)
                 try:
                     content = p.read_text(encoding="utf-8", errors="ignore")
                 except Exception:
                     continue
+                seen_names.add(skill_name)
 
                 sha = compute_sha256(content)
                 is_local = 1 if str(p.resolve()) in project_paths_set else 0
+                source_tier, source_root = source_info.get(p, (0 if is_local else 1, p.parent.parent))
+                source_root = str(Path(source_root).resolve())
 
-                if skill_name in existing and existing[skill_name][0] == sha and existing[skill_name][1] == is_local:
+                old = existing.get(skill_name)
+                if old and old[0] == sha and old[1] == is_local and old[2] == str(p.resolve()) and old[3] == source_root and old[4] == source_tier:
                     continue  # Unchanged, skip disk parsing
 
-                desc, lead = extract_frontmatter_and_lead(content)
+                if old and old[0] == sha:
+                    desc, lead = None, None
+                else:
+                    desc, lead = extract_frontmatter_and_lead(content)
                 tokens = len(content.split()) + len(content) // 4
 
                 cursor.execute("""
                     INSERT INTO skills_sidecar 
-                    (skill_name, skill_path, sha256, description, lead_paragraph, is_project_local, indexed_tokens, last_updated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (skill_name, skill_path, sha256, description, lead_paragraph, is_project_local, indexed_tokens, last_updated, source_root, source_tier)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
                     ON CONFLICT(skill_name) DO UPDATE SET
                         skill_path=excluded.skill_path,
                         sha256=excluded.sha256,
-                        description=excluded.description,
-                        lead_paragraph=excluded.lead_paragraph,
+                        description=COALESCE(excluded.description, skills_sidecar.description),
+                        lead_paragraph=COALESCE(excluded.lead_paragraph, skills_sidecar.lead_paragraph),
                         is_project_local=excluded.is_project_local,
                         indexed_tokens=excluded.indexed_tokens,
+                        source_root=excluded.source_root,
+                        source_tier=excluded.source_tier,
                         last_updated=CURRENT_TIMESTAMP
-                    WHERE excluded.is_project_local >= skills_sidecar.is_project_local
-                """, (skill_name, str(p.resolve()), sha, desc, lead, is_local, tokens))
+                """, (skill_name, str(p.resolve()), sha, desc, lead, is_local, tokens, source_root, source_tier))
                 updated_count += 1
+
+            if replace_tiers:
+                if seen_names:
+                    placeholders = ",".join("?" for _ in replace_tiers)
+                    name_placeholders = ",".join("?" for _ in seen_names)
+                    cursor.execute(
+                        f"DELETE FROM skills_sidecar WHERE source_tier IN ({placeholders}) AND skill_name NOT IN ({name_placeholders})",
+                        (*replace_tiers, *seen_names),
+                    )
+                else:
+                    placeholders = ",".join("?" for _ in replace_tiers)
+                    cursor.execute(f"DELETE FROM skills_sidecar WHERE source_tier IN ({placeholders})", tuple(replace_tiers))
+
+            if replace_subtrees:
+                current_paths = {str(Path(p).resolve()) for p in skill_paths if p.is_file()}
+                for row in cursor.execute("SELECT skill_name, skill_path FROM skills_sidecar").fetchall():
+                    existing_path = Path(row[1]).resolve()
+                    in_scope = any(existing_path.is_relative_to(Path(scope).resolve()) for scope in replace_subtrees)
+                    if in_scope and str(existing_path) not in current_paths:
+                        cursor.execute("DELETE FROM skills_sidecar WHERE skill_name = ?", (row[0],))
 
             conn.commit()
 
