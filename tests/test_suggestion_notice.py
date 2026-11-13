@@ -31,6 +31,31 @@ def test_notice_survives_low_context_ceiling():
     assert "Recommended skill capability to install" in block
 
 
+def test_notice_survives_ceiling_tighter_than_boilerplate():
+    """Si el techo no alcanza ni para la instrucción, el aviso se emite solo (nunca se pierde)."""
+    coordinator = ContextCoordinator(config=PluginConfig(max_context_tokens=110), sidecar=None)
+    block = coordinator._assemble_context_block(
+        skill=None, skill_content=None,
+        memories=_long_memories(),
+        suggested_skill=SUGGESTED,
+        language="es",
+    )
+    assert block is not None
+    assert SUGGESTED in block
+    assert "Capacidad de skill recomendada" in block
+
+
+def test_impossible_ceiling_returns_none():
+    coordinator = ContextCoordinator(config=PluginConfig(max_context_tokens=8), sidecar=None)
+    block = coordinator._assemble_context_block(
+        skill=None, skill_content=None,
+        memories=_long_memories(),
+        suggested_skill=SUGGESTED,
+        language="es",
+    )
+    assert block is None
+
+
 def test_notice_survives_ceiling_with_skill_items_present():
     """Si hay items de skill la nota se omite (hay guía real); pero el bloque nunca excede el techo."""
     from neural_context.memory import estimate_tokens

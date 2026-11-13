@@ -625,6 +625,12 @@ class ContextCoordinator:
                 elif mem_lines:
                     mem_lines.pop()
                 else:
+                    # Nada más que recortar: la sugerencia de skill pesa más que el
+                    # boilerplate, así que se degrada al aviso mínimo antes de rendirse.
+                    if notice_line:
+                        minimal = f"{header}\n{notice_line}\n{footer}"
+                        if estimate_tokens(minimal) <= max_tokens:
+                            return minimal
                     return None
                 sections = [header]
                 for sk_hdr, cur_lines in rendered_skill_blocks:
