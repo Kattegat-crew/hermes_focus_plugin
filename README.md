@@ -56,7 +56,7 @@ In production LLM agent environments, context provisioning faces compound scalin
         │ Phase 2: Grounded Skill Routing                         │
         │ - Enriches skill search with discovered domain facts    │
         │ - Bipartite Concept Graph spreading activation          │
-        │ - Sub-5ms BM25 ranking over SQLite sidecar index        │
+        │ - BM25 ranking over the local SQLite sidecar index      │
         │ - Skill gap detection: suggests missing capabilities    │
         └────────────────────────────┬────────────────────────────┘
                                      │
@@ -85,15 +85,16 @@ In production LLM agent environments, context provisioning faces compound scalin
 
 ## Key Differentiators
 
-- **Cognitive Arbiter (4 Quadrants)**: Classifies every user turn into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`. Casual conversational turns exit immediately with 0 tokens injected. In local graph mode execution takes $<5\text{ ms}$; in host LLM mode intent classification executes via the active model provider with zero intermediate third-party routing proxies.
-- **Sequential Two-Phase Grounding**: Always queries memory and history databases *before* skill routing. Discovered architectural facts and entity tech stacks dynamically enrich and boost (1.35x) the semantic search query for procedural skills.
+- **Cognitive Arbiter (4 Quadrants)**: Classifies turns into `DIRECT_REPLY`, `SKILL_ONLY`, `MEMORY_ONLY`, or `ENRICHED_TASK`. Host model calls can add latency; provider constraints still apply.
+- **Sequential Two-Phase Grounding**: When requested by triage, queries memory and history before skill routing. Discovered facts can enrich the semantic skill query.
+- **Model-call disclosure**: Host-backed triage and host-LLM skill routing are separate decisions and may issue an extra model call when both stages use the host model.
 - **Symmetric Bipartite Personalized PageRank**: Unifies multi-hop concept discovery across both procedural skills (`GraphRouter`) and historical session databases (`SelectiveMemoryRetriever`). Propagates activation across entity seeds and discriminative bridge concepts without cross-topic contamination.
-- **Universal Multilingual Coverage**: 100% open to all Hermes-supported locales and scripts (Latin, Cyrillic, CJK, Arabic, Hebrew, Greek, Thai, Indic, etc.). Employs continuous mathematical Unicode properties, cluster-density n-grams, and casefold normalization without closed language lists or hardcoded script heuristics.
-- **Adaptive Execution & Dynamic Budgets**: Eliminates static limits and artificial truncations. Token limits and deadlines adapt dynamically based on prompt complexity and model reasoning demands. In case of output truncation by reasoning models, an adaptive retry doubles headroom up to 12,000 tokens within a safe execution window.
+- **Multilingual Text Processing**: Uses Unicode-aware tokenization and normalization; quality depends on the underlying model and catalog.
+- **Configurable Budgets**: Memory/context ceilings and plugin timeouts are optional explicit overrides. A zero value leaves token limits to the host/provider and does not impose a plugin deadline. A configured positive model-token limit can trigger one bounded retry after truncation.
 - **Zero KV-Cache Mutation**: Injects context exclusively into the ephemeral user message turn. The System Prompt remains byte-stable, maximizing prompt cache hits and minimizing latency.
 - **Zero Duplication of Default System Memory**: Leaves default Hermes memory files (`MEMORY.md`, `USER.md`, `SOUL.md`, `AGENTS.md`) untouched so they are never duplicated in context. Inspects Hermes `state.db` (excluding active `session_id`), `engram.db`, and external SQL databases.
 - **Atomic Hermes Host Persistence**: Implements `ctx.set_config` for safe, atomic configuration updates in compliance with Hermes plugin lifecycle contracts.
-- **Auditable Receipts**: Emits structured JSON records to `receipts.jsonl` tracking route decisions, injected tokens, latency, and model provenance.
+- **Auditable Receipts**: Emits structured JSON records to `receipts.jsonl` with estimated tokens from the rendered context, measured plugin triage elapsed time, configured and executed routing backend, and status/error details. Estimates are not provider token accounting.
 
 ---
 
@@ -136,19 +137,19 @@ plugins:
       enabled: true
       settings:
         router_backend: "graph"         # "graph" (default, bipartite Personalized PageRank) | "host_llm"
-        max_context_tokens: 0           # 0 for unlimited (default, preserves full procedural depth)
-        memory_token_budget: 0          # 0 for unlimited (default, preserves all matching facts)
+        max_context_tokens: 0           # No plugin ceiling; host/provider limits still apply
+        memory_token_budget: 0          # No plugin memory ceiling
         selective_memory_enabled: true  # Surgical memory probing based on extracted entities
         software_inspection_enabled: true
-        timeout_ms: 8000
+        timeout_ms: 0               # 0 leaves timeout control to host/provider
 ```
 
 ---
 
 ## Security & Fail-Closed Boundaries
 
-- **Untrusted Context Encapsulation**: Injected skills and memory facts are wrapped in strict `<neural_context>` XML tags with explicit procedural scoping, ensuring retrieved third-party text cannot hijack model persona or execute unauthorized commands.
-- **Strict Fail-Closed Architecture**: If parsing, network routing, or sidecar lookup exceeds the timeout deadline (default: 8000ms) or encounters an error, the engine defaults safely to `DIRECT_REPLY` with zero context injected. The user turn proceeds normally without interruption.
+- **Untrusted Retrieved Text**: Skill text is escaped before inclusion in the `<neural_context>` wrapper. Skill guidance and historical memory facts are labeled separately; this is a prompt boundary, not an injection-proof guarantee.
+- **Explicit Failure Reporting**: Triage failures retain an error cause and elapsed time and fail closed to a direct reply. A plugin timeout is only applied when explicitly configured; host/provider limits may still apply.
 - **Zero File Mutation**: User `SKILL.md` catalogs and workspace files are strictly immutable. Content hashes and procedural descriptions are stored in a local SQLite sidecar (`sidecar_index.db`).
 - **Read-Only Memory Sandboxing**: Memory scans enforce strict directory allowlists, symlink boundary checks, and escaped wildcard queries (`ESCAPE '\'`), preventing directory traversal or query injection.
 
@@ -163,7 +164,7 @@ pytest -v
 # Run official Hermes Plugin validation (15/15 checks passed)
 hermes plugins validate . --json
 
-# Run official Hermes Plugin doctor (healthy)
+# Run Hermes Plugin doctor
 hermes plugins doctor .
 ```
 

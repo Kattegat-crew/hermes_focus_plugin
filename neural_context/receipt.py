@@ -35,7 +35,27 @@ class ReceiptEmitter:
 
         is_truncated = getattr(analysis, "truncation_detected", False) or (getattr(route_result, "status", "") == "error_truncated")
         status_val = "error_truncated" if is_truncated else (route_result.status if not error else "error")
-        error_val = error or ("Model response truncated by token limit" if is_truncated else None)
+        error_val = error or analysis.error or ("Model response truncated by token limit" if is_truncated else None)
+
+        rendered_block = route_result.combined_context_block or ""
+        rendered_tokens = estimate_tokens(rendered_block) if rendered_block else 0
+        memory_marker = "## Historical Memory (Untrusted Facts)"
+        memory_tokens = 0
+        if memory_marker in rendered_block:
+            memory_section = rendered_block.split(memory_marker, 1)[1].split("[Instruction:", 1)[0]
+            memory_tokens = estimate_tokens(memory_section)
+        skill_lines = []
+        in_skill = False
+        for line in rendered_block.splitlines():
+            if line.startswith("## Active Procedural Guidance"):
+                in_skill = True
+                skill_lines.append(line)
+                continue
+            elif line.startswith("## Historical Memory") or line.startswith("[Instruction:") or line == "</neural_context>":
+                in_skill = False
+            elif in_skill:
+                skill_lines.append(line)
+        skill_tokens = estimate_tokens("\n".join(skill_lines)) if skill_lines else 0
 
         record = ReceiptRecord(
             turn_id=turn_id,
@@ -46,13 +66,18 @@ class ReceiptEmitter:
             is_task=analysis.is_actionable_task,
             domain="software" if analysis.domain.is_software_task else "general",
             entities_detected=analysis.extracted_entities,
-            memory_injected_tokens=sum(m.token_estimate for m in route_result.selected_memories),
+            memory_injected_tokens=memory_tokens,
             selected_skill=route_result.selected_skill.name if route_result.selected_skill else None,
             suggested_missing_skill=route_result.suggested_missing_skill,
             skill_is_project_local=route_result.selected_skill.is_project_local if route_result.selected_skill else False,
-            skill_injected_tokens=estimate_tokens(route_result.injected_skill_content or "") if route_result.injected_skill_content else 0,
+            skill_injected_tokens=skill_tokens,
             router_backend=route_result.router_backend,
-            triage_latency_ms=route_result.triage_latency_ms,
+            configured_router_backend=route_result.configured_router_backend,
+            triage_latency_ms=analysis.model_latency_ms,
+            model_latency_ms=analysis.model_latency_ms,
+            coordination_latency_ms=route_result.coordination_latency_ms,
+            rendered_context_tokens=rendered_tokens,
+            context_overhead_tokens=max(0, rendered_tokens - memory_tokens - skill_tokens),
             tokens_saved_estimate=route_result.tokens_saved_estimate,
             status=status_val,
             error=error_val
