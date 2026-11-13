@@ -373,6 +373,7 @@ class ContextCoordinator:
                 triage_latency_ms=analysis.model_latency_ms,
                 coordination_latency_ms=(time.perf_counter() - start_time) * 1000,
                 router_backend=None,
+                configured_router_backend=self.config.router_backend,
                 tokens_saved_estimate=0,
                 status="error_truncated" if is_trunc else ("error" if analysis.error else "skipped_no_context_needed"),
                 message=analysis.reasoning or "Direct response: no external context required for this turn."
