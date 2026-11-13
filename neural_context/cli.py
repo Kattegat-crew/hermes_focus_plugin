@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
-from .config import PluginConfig, get_hermes_home
+from .config import PluginConfig
 from .receipt import ReceiptEmitter
-from .sidecar import SidecarIndex
+from .sidecar import SidecarIndex, discover_skill_inventory
 
 
 def register_cli(subparser: argparse.ArgumentParser) -> None:
@@ -60,7 +60,7 @@ def _coerce_and_validate(key: str, val: str) -> Tuple[Optional[Any], Optional[st
         except ValueError:
             return None, f"Invalid value for '{key}': expected integer, got '{val}'"
     elif expected_type is str:
-        if key == "router_backend" and val not in ("host_llm", "graph", "heuristic"):
+        if key == "router_backend" and val not in ("host_llm", "graph"):
             return None, f"Invalid backend '{val}': choose from 'host_llm', 'graph'"
         return val, None
 
@@ -129,14 +129,50 @@ def handle_cli(
             return 1
 
     if cmd == "index":
-        scan_dir = Path(args.path) if getattr(args, "path", None) else (get_hermes_home() / "skills")
-        print(f"Scanning skills in: {scan_dir}")
-        skill_files: List[Path] = []
-        if scan_dir.is_dir():
-            for p in scan_dir.rglob("SKILL.md"):
-                skill_files.append(p)
+        skill_files, project_paths, source_info, names, tiers = discover_skill_inventory(
+            include_project=config.software_inspection_enabled
+        )
+        requested = getattr(args, "path", None)
+        if requested:
+            scan_dir = Path(requested).expanduser().resolve()
+            if not scan_dir.is_dir():
+                print(f"[ERROR] Skill source is not a directory: {scan_dir}")
+                return 1
+            skill_files = [
+                path for path in skill_files
+                if path.is_relative_to(scan_dir) or scan_dir.is_relative_to(path.parent)
+            ]
+            if not skill_files:
+                try:
+                    from agent import skill_utils
+                    roots = [Path(root).resolve() for _tier, root in skill_utils.get_skill_search_roots(
+                        include_project=config.software_inspection_enabled
+                    )]
+                    if not any(scan_dir.is_relative_to(root) for root in roots):
+                        print("[ERROR] Path is not part of the active trusted Hermes skill inventory.")
+                        return 1
+                except Exception:
+                    print("[ERROR] Cannot verify an empty path against the native trusted skill roots.")
+                    return 1
+            project_paths = [path for path in project_paths if path in skill_files]
+            source_info = {path: source_info[path] for path in skill_files}
+            names = {path: names[path] for path in skill_files if path in names}
+            # Explicit paths are partial syncs: preserve unrelated source tiers.
+            tiers = None
+            replace_subtrees = [scan_dir]
+            print(f"Scanning trusted skills in: {scan_dir}")
+        else:
+            print("Scanning the active trusted Hermes skill inventory.")
+            replace_subtrees = None
 
-        updated = sidecar.sync_skills(skill_files)
+        updated = sidecar.sync_skills(
+            skill_files,
+            project_local_paths=project_paths,
+            source_info=source_info,
+            skill_names=names,
+            replace_tiers=tiers,
+            replace_subtrees=replace_subtrees,
+        )
         print(f"Synchronization complete: {updated} skills updated, total indexed: {sidecar.n_docs}.")
         return 0
 
@@ -148,7 +184,7 @@ def handle_cli(
         print(f"=== Focus Verifiable Receipts (Last {limit} turns) ===")
         print(f"  Turns Audited       : {stats.get('total_turns', 0)}")
         print(f"  Skills Routed       : {stats.get('skills_routed', 0)}")
-        print(f"  Token Reduction     : {token_pct}% saved vs static preloading")
+        print(f"  Catalog Comparison  : {token_pct}% estimated vs hypothetical active-catalog baseline (not provider token usage)")
         print(f"  Conversational Exit : {fast_exit_pct}% turns fast-exited with zero token bloat")
         print(f"  Tokens Saved Total  : {stats.get('total_tokens_saved', 0)} tokens")
         return 0
@@ -171,7 +207,7 @@ def handle_cli(
             try:
                 ctx.set_config(key, coerced)
                 setattr(config, key, coerced)
-                print(f"Successfully updated '{key}' to {coerced}")
+                print(f"Saved '{key}' as {coerced}. Reload the plugin to refresh cached services and apply this setting.")
                 return 0
             except Exception as e:
                 print(f"[ERROR] Could not update config: {e}")
@@ -185,7 +221,7 @@ def handle_cli(
         print(f"  memory_token_budget         : {config.memory_token_budget} (0 = unlimited / unconstrained)")
         print(f"  selective_memory_enabled    : {config.selective_memory_enabled} (Recall domain facts)")
         print(f"  software_inspection_enabled : {config.software_inspection_enabled} (Detect AGENTS.md & local skills)")
-        print(f"  timeout_ms                  : {config.timeout_ms} ms (Pre-inference deadline)")
+        print(f"  timeout_ms                  : {config.timeout_ms} ms (0 means no plugin-imposed timeout)")
         print("\nTo update a parameter:")
         print("  hermes focus config --set max_context_tokens=1500")
         print("Or edit directly via:")

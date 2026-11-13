@@ -60,6 +60,54 @@ def test_cli_status(tmp_path, capsys):
     assert "Skills Indexed" in captured.out
 
 
+def test_cli_index_uses_shared_native_inventory_and_inspection_setting(tmp_path, monkeypatch, capsys):
+    from unittest.mock import Mock
+    import neural_context.cli as cli
+
+    skill = tmp_path / "trusted" / "SKILL.md"
+    skill.parent.mkdir()
+    skill.write_text("---\nname: trusted\n---\n")
+    inventory = ([skill], [], {skill: (1, tmp_path)}, {skill: "trusted"}, {0, 1, 2, 3})
+    discover = Mock(return_value=inventory)
+    monkeypatch.setattr(cli, "discover_skill_inventory", discover)
+    sidecar = Mock()
+    config = PluginConfig(software_inspection_enabled=False)
+
+    result = handle_cli(["index"], config, sidecar, None)
+
+    assert result == 0
+    discover.assert_called_once_with(include_project=False)
+    sidecar.sync_skills.assert_called_once_with(
+        [skill], project_local_paths=[], source_info={skill: (1, tmp_path)},
+        skill_names={skill: "trusted"}, replace_tiers={0, 1, 2, 3}, replace_subtrees=None,
+    )
+
+
+def test_cli_empty_trusted_subtree_still_prunes_removed_skill(tmp_path, monkeypatch):
+    import sys
+    import types
+    from unittest.mock import Mock
+    import neural_context.cli as cli
+
+    trusted_root = tmp_path / "profile" / "skills"
+    removed_source = trusted_root / "gone"
+    removed_source.mkdir(parents=True)
+    fake = types.ModuleType("agent.skill_utils")
+    fake.get_skill_search_roots = lambda include_project=True: [(1, trusted_root)]
+    agent = types.ModuleType("agent")
+    agent.skill_utils = fake
+    monkeypatch.setitem(sys.modules, "agent", agent)
+    monkeypatch.setitem(sys.modules, "agent.skill_utils", fake)
+    monkeypatch.setattr(cli, "discover_skill_inventory", lambda **_: ([], [], {}, {}, {0, 1, 2, 3}))
+    index = Mock()
+
+    result = cli.handle_cli(["index", "--path", str(removed_source)], PluginConfig(), index, None)
+
+    assert result == 0
+    assert index.sync_skills.call_args.kwargs["replace_subtrees"] == [removed_source.resolve()]
+    assert index.sync_skills.call_args.args == ([],)
+
+
 def test_cli_config_view_and_set(tmp_path, capsys):
     from unittest.mock import MagicMock
 
@@ -77,7 +125,7 @@ def test_cli_config_view_and_set(tmp_path, capsys):
     ret_set = handle_cli(args_set, config, None, None, ctx=mock_ctx)
     assert ret_set == 0
     captured_set = capsys.readouterr()
-    assert "Successfully updated 'max_context_tokens' to 1500" in captured_set.out
+    assert "Reload the plugin to refresh cached services" in captured_set.out
     mock_ctx.set_config.assert_called_once_with("max_context_tokens", 1500)
     assert config.max_context_tokens == 1500
 

@@ -37,18 +37,18 @@ config_schema:
   router_backend:
     type: str
     default: "graph"
-    description: "Router engine: 'graph' (default, 100% free graph-theoretic Personalized PageRank semantic router) or 'host_llm' (uses user active model with graph fallback)"
+    description: "Configured router: 'graph' or 'host_llm'; receipts record the backend that actually routed each turn."
   max_context_tokens:
     type: int
     default: 0
-    description: "Context ceiling in tokens: 0 for unlimited (default, preserves full procedural depth without truncation), or positive integer for strict ceiling"
+    description: "Plugin context ceiling in estimated tokens: 0 imposes no plugin ceiling; host/provider limits may still truncate, or use a positive integer ceiling."
   selective_memory_enabled:
     type: bool
     default: true
   memory_token_budget:
     type: int
     default: 0
-    description: "Memory budget in tokens: 0 for unlimited (default, preserves all matching facts), or positive integer for strict ceiling"
+    description: "Memory context budget in estimated tokens: 0 imposes no plugin budget, or use a positive integer ceiling."
   software_inspection_enabled:
     type: bool
     default: true
@@ -60,4 +60,5 @@ config_schema:
     default: ""
   timeout_ms:
     type: int
-    default: 8000
+    default: 0
+    description: "Optional plugin model timeout in milliseconds; 0 leaves timeout control to the host/provider."

@@ -51,7 +51,7 @@ class PluginConfig(BaseModel):
     software_inspection_enabled: bool = True
     sidecar_db_path: str = ""
     receipts_path: str = ""
-    timeout_ms: int = 8000
+    timeout_ms: int = 0  # 0 = no plugin-imposed deadline; provider limits still apply
 
     @classmethod
     def load_from_ctx(cls, ctx: Any = None) -> PluginConfig:

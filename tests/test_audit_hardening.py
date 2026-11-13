@@ -147,13 +147,14 @@ def test_multi_tier_skill_discovery(tmp_path: Path):
     global_names = [p.parent.name for p in globals_found]
     local_names = [p.parent.name for p in locals_found]
 
-    assert "profile_tool" in global_names
-    assert "shared_tool" in global_names
-    assert "local_tool" in local_names
+    # Without native Hermes inventory APIs, neither raw profile scanning nor
+    # project discovery can assert disabled/quarantine/offerability filters.
+    assert global_names == []
+    assert local_names == []
 
 
-def test_triage_uses_sufficient_max_tokens_budget_for_reasoning_models():
-    """Ensure host LLM complete() receives max_tokens >= 2500 to prevent reasoning token truncation."""
+def test_triage_does_not_impose_a_default_model_token_cap():
+    """An unset plugin limit leaves model-token budgeting to the host/provider."""
     mock_llm = MagicMock()
     mock_llm.complete.return_value = '{"route": "DIRECT_REPLY", "reasoning": "greeting"}'
 
@@ -165,8 +166,7 @@ def test_triage_uses_sufficient_max_tokens_budget_for_reasoning_models():
 
     assert mock_llm.complete.called
     kwargs = mock_llm.complete.call_args[1]
-    assert kwargs.get("max_tokens", 0) >= 2500
-    assert kwargs.get("max_tokens") == 3000
+    assert "max_tokens" not in kwargs
 
 
 def test_triage_truncation_detection_and_degradation_receipt(tmp_path):

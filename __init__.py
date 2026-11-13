@@ -9,7 +9,6 @@ while preserving KV-cache stability on the user message turn.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,11 +19,11 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from neural_context.cli import handle_cli, register_cli
-from neural_context.config import PluginConfig, get_hermes_home
+from neural_context.config import PluginConfig
 from neural_context.models import RouteResult, TriageAnalysis
 from neural_context.receipt import ReceiptEmitter
 from neural_context.router import ContextCoordinator
-from neural_context.sidecar import SidecarIndex
+from neural_context.sidecar import SidecarIndex, discover_skill_inventory
 from neural_context.triage import CognitiveTriage
 
 PLUGIN_NAME = "focus"
@@ -41,7 +40,6 @@ _receipt_emitter: Optional[ReceiptEmitter] = None
 
 # Thread-safe / session-isolated store for turn state: key -> (TriageAnalysis, RouteResult, platform, model)
 _session_turns: Dict[str, Tuple[TriageAnalysis, RouteResult, str, str]] = {}
-_synced_cwds: set[str] = set()
 
 
 def extract_message_text(user_message: Any) -> str:
@@ -70,64 +68,28 @@ def extract_message_text(user_message: Any) -> str:
 
 
 def discover_all_skill_paths(hermes_home: Path, cwd: Optional[Path] = None) -> Tuple[List[Path], List[Path]]:
-    """
-    Discovers skill files across standard Hermes installations:
-    1. Active profile / Hermes home skills directory (<hermes_home>/skills/)
-    2. Shared multi-agent skills directory (<hermes_home>/../skills/ or parent root)
-    3. Custom environment directory (HERMES_SKILLS_DIR)
-    4. Project-local sovereign skills (<cwd>/.skills/, <cwd>/.agents/skills/)
-    """
-    global_paths: List[Path] = []
-    local_paths: List[Path] = []
-
-    # 1. Profile / standard home skills
-    if hermes_home.is_dir():
-        p_skills = hermes_home / "skills"
-        if p_skills.is_dir():
-            global_paths.extend(p_skills.rglob("SKILL.md"))
-
-        # 2. Shared root skills when hermes_home is a sub-profile
-        if hermes_home.parent.name == "profiles":
-            shared_skills = hermes_home.parent.parent / "skills"
-            if shared_skills.is_dir():
-                global_paths.extend(shared_skills.rglob("SKILL.md"))
-
-    # 3. Environment variable if user customized skills location
-    env_dir = os.environ.get("HERMES_SKILLS_DIR")
-    if env_dir and Path(env_dir).is_dir():
-        global_paths.extend(Path(env_dir).rglob("SKILL.md"))
-
-    # 4. Project-local sovereign skills in current workspace
-    if cwd and cwd.is_dir():
-        for sub in [".skills", ".agents/skills", ".claude/skills"]:
-            lp = cwd / sub
-            if lp.is_dir():
-                local_paths.extend(lp.rglob("SKILL.md"))
-
-    # Deduplicate by resolved canonical path
-    deduped_global = list({p.resolve(): p for p in global_paths if p.is_file()}.values())
-    deduped_local = list({p.resolve(): p for p in local_paths if p.is_file()}.values())
-    return deduped_global, deduped_local
+    """Compatibility wrapper around Hermes' trusted, active-profile inventory."""
+    paths, project_paths, _, _, _ = discover_skill_inventory()
+    project_set = set(project_paths)
+    return [p for p in paths if p not in project_set], project_paths
 
 
 def _get_services(ctx: Any = None):
-    global _config, _sidecar, _triage, _coordinator, _receipt_emitter, _synced_cwds
+    global _config, _sidecar, _triage, _coordinator, _receipt_emitter
     if _config is None:
         _config = PluginConfig.load_from_ctx(ctx)
-    cwd_raw = getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
-    cwd_p = Path(cwd_raw).resolve() if cwd_raw else None
     if _sidecar is None:
         _sidecar = SidecarIndex(db_path=_config.sidecar_db_path)
-        if _sidecar.n_docs == 0:
-            g_paths, l_paths = discover_all_skill_paths(get_hermes_home(), cwd=cwd_p)
-            _sidecar.sync_skills(g_paths + l_paths, project_local_paths=l_paths)
-            if cwd_p:
-                _synced_cwds.add(str(cwd_p))
-    if cwd_p and str(cwd_p) not in _synced_cwds and _sidecar is not None:
-        _synced_cwds.add(str(cwd_p))
-        _, l_paths = discover_all_skill_paths(Path("/nonexistent"), cwd=cwd_p)
-        if l_paths:
-            _sidecar.sync_skills(l_paths, project_local_paths=l_paths)
+    paths, project_paths, source_info, names, tiers = discover_skill_inventory(
+        include_project=_config.software_inspection_enabled
+    )
+    _sidecar.sync_skills(
+        paths,
+        project_local_paths=project_paths,
+        source_info=source_info,
+        skill_names=names,
+        replace_tiers=tiers,
+    )
     if _triage is None:
         _triage = CognitiveTriage(ctx=ctx, timeout_ms=_config.timeout_ms)
     if _coordinator is None:
@@ -165,8 +127,10 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
 
     try:
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
-        cwd = kwargs.get("cwd") or getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
-        analysis = triage.analyze(text, cwd=cwd)
+        cwd = kwargs.get("cwd") or getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None)
+        analysis = triage.analyze(
+            text, cwd=cwd, software_inspection_enabled=config.software_inspection_enabled
+        )
         result = coordinator.execute(analysis, user_message=text, cwd=cwd, session_id=session_id or None)
 
         # Store session/turn state isolated from concurrent sessions (bounded to 256 entries)
@@ -265,9 +229,13 @@ def register(ctx: Any) -> None:
             if not query:
                 return "Error: query is required."
             _, _, triage, coordinator, _ = _get_services(ctx)
-            cwd = getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None) or os.getcwd()
-            analysis = triage.analyze(query, cwd=cwd)
-            result = coordinator.execute(analysis, user_message=query, cwd=cwd)
+            cwd = kw.get("cwd") or getattr(ctx, "session_cwd", None) or getattr(ctx, "cwd", None)
+            analysis = triage.analyze(
+                query, cwd=cwd, software_inspection_enabled=_config.software_inspection_enabled
+            )
+            result = coordinator.execute(
+                analysis, user_message=query, cwd=cwd, session_id=args.get("session_id") or kw.get("session_id")
+            )
             selected = (
                 ", ".join(s.name for s in result.selected_skills)
                 if result.selected_skills
@@ -281,7 +249,8 @@ def register(ctx: Any) -> None:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "The user prompt or task description to evaluate."}
+                    "query": {"type": "string", "description": "The user prompt or task description to evaluate."},
+                    "session_id": {"type": "string", "description": "Optional verified session identity for memory scoping."}
                 },
                 "required": ["query"]
             }

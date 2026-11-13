@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import os
 import re
 import time
 from pathlib import Path
@@ -82,12 +81,14 @@ OUTPUT SPECIFICATION (Pure JSON only):
 """
 
 
-def inspect_workspace_governance(cwd: Optional[str] = None) -> DomainClassification:
+def inspect_workspace_governance(cwd: Optional[str] = None, enabled: bool = True) -> DomainClassification:
     """
     Inspects whether the current workspace is a documented software repository
     with sovereign governance (AGENTS.md, .skills/, .agents/skills/).
     """
-    root = Path(cwd or os.getcwd()).resolve()
+    if not enabled or not cwd:
+        return DomainClassification(is_software_task=False)
+    root = Path(cwd).resolve()
     current = root
 
     governance_root: Optional[str] = None
@@ -144,26 +145,36 @@ class CognitiveTriage:
         self,
         ctx: Any = None,
         model_fn: Optional[Callable[[str], str]] = None,
-        max_tokens: int = 3000,
-        timeout_ms: int = 8000,
+        max_tokens: int = 0,
+        timeout_ms: int = 0,
     ):
         self.ctx = ctx
         self.model_fn = model_fn
         self.max_tokens = max_tokens
         self.timeout_ms = timeout_ms
 
-    def analyze(self, user_message: str, cwd: Optional[str] = None) -> TriageAnalysis:
+    def analyze(
+        self,
+        user_message: str,
+        cwd: Optional[str] = None,
+        software_inspection_enabled: bool = True,
+    ) -> TriageAnalysis:
         clean_text = user_message.strip()
-        domain_info = inspect_workspace_governance(cwd)
+        domain_info = inspect_workspace_governance(cwd, enabled=software_inspection_enabled)
 
         # 1. Execute cognitive interpretation via model
-        llm_output, is_truncated = self._call_model(clean_text)
+        model_started = time.perf_counter()
+        llm_output, is_truncated, model_error = self._call_model(clean_text)
+        model_elapsed_ms = (time.perf_counter() - model_started) * 1000
 
         # 2. Parse and validate structured output
-        analysis = self._parse_structured_output(llm_output, clean_text, domain_info, is_truncated=is_truncated)
+        analysis = self._parse_structured_output(
+            llm_output, clean_text, domain_info, is_truncated=is_truncated, model_error=model_error
+        )
+        analysis.model_latency_ms = model_elapsed_ms
         return analysis
 
-    def _call_model(self, user_text: str) -> tuple[Optional[str], bool]:
+    def _call_model(self, user_text: str) -> tuple[Optional[str], bool, Optional[str]]:
         """Invokes the model facade (ctx.llm, custom model_fn, or structured prompt) with adaptive deadline & tokens."""
         hermes_locale = get_hermes_language()
         locale_directive = f"\n[Hermes Configured Locale: {hermes_locale}]\n" if hermes_locale else ""
@@ -171,12 +182,10 @@ class CognitiveTriage:
         timeout_s: Optional[float] = (self.timeout_ms / 1000.0) if (self.timeout_ms and self.timeout_ms > 0) else None
 
         # Compute dynamic token budget based on input complexity (preserves exact base for short prompts)
-        effective_max_tokens = max(self.max_tokens, min(8192, self.max_tokens + max(0, len(user_text) - 200) * 2))
+        effective_max_tokens = self.max_tokens + max(0, len(user_text) - 200) * 2 if self.max_tokens > 0 else 0
 
-        # Adaptive timeout: scale with input complexity if using standard default timeout
         effective_timeout_s = timeout_s
-        if timeout_s is not None and self.timeout_ms == 8000 and len(user_text) > 400:
-            effective_timeout_s = min(20.0, timeout_s + (len(user_text) / 1000.0) * 3.0)
+        failure: Optional[str] = None
 
         # Case A: Custom model callable injected (useful for tests or dedicated local LLM)
         if self.model_fn is not None:
@@ -188,15 +197,15 @@ class CognitiveTriage:
                         out = future.result(timeout=effective_timeout_s)
                     except concurrent.futures.TimeoutError:
                         executor.shutdown(wait=False, cancel_futures=True)
-                        return None, False
+                        return None, False, "model_timeout"
                     finally:
                         executor.shutdown(wait=False)
                 else:
                     out = self.model_fn(prompt)
                 truncated = _is_truncated_completion(out)
-                return out, truncated
-            except Exception:
-                pass
+                return out, truncated, None
+            except Exception as exc:
+                failure = f"model_exception:{type(exc).__name__}"
 
         # Case B: Host LLM facade from Hermes Agent (ctx.llm)
         if self.ctx is not None and hasattr(self.ctx, "llm") and self.ctx.llm is not None:
@@ -204,48 +213,52 @@ class CognitiveTriage:
                 t0 = time.perf_counter()
                 complete_kwargs: Dict[str, Any] = {
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": effective_max_tokens,
                     "temperature": 0.0,
                 }
+                if effective_max_tokens > 0:
+                    complete_kwargs["max_tokens"] = effective_max_tokens
                 if effective_timeout_s is not None:
                     complete_kwargs["timeout"] = effective_timeout_s
                 resp = self.ctx.llm.complete(**complete_kwargs)
                 text = resp.text if hasattr(resp, "text") and isinstance(resp.text, str) else (resp if isinstance(resp, str) else None)
 
                 # Check for truncation (finish_reason=length with empty content or cut-off JSON)
-                if _is_truncated_completion(text):
+                if _is_truncated_completion(text) and effective_max_tokens > 0:
                     # Adaptive retry with expanded budget without tight artificial cuts
                     try:
-                        retry_budget = max(self.max_tokens * 2, min(12000, effective_max_tokens * 2))
+                        retry_budget = effective_max_tokens * 2
                         retry_kwargs: Dict[str, Any] = {
                             "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": retry_budget,
                             "temperature": 0.0,
                         }
+                        retry_kwargs["max_tokens"] = retry_budget
                         if effective_timeout_s is not None:
                             elapsed = time.perf_counter() - t0
-                            remaining_s = max(2.0, effective_timeout_s - elapsed)
+                            remaining_s = effective_timeout_s - elapsed
+                            if remaining_s <= 0:
+                                return text, True, "model_truncated"
                             retry_kwargs["timeout"] = remaining_s
                         retry_resp = self.ctx.llm.complete(**retry_kwargs)
                         retry_text = retry_resp.text if hasattr(retry_resp, "text") and isinstance(retry_resp.text, str) else (retry_resp if isinstance(retry_resp, str) else None)
                         if not _is_truncated_completion(retry_text):
-                            return retry_text, False
-                        return retry_text, True
-                    except Exception:
-                        return text, True
+                            return retry_text, False, None
+                        return retry_text, True, "model_truncated"
+                    except Exception as exc:
+                        return text, True, f"model_retry_exception:{type(exc).__name__}"
 
-                return text, False
-            except Exception:
-                pass
+                return text, False, None
+            except Exception as exc:
+                failure = f"model_exception:{type(exc).__name__}"
 
-        return None, False
+        return None, False, failure or "model_unavailable"
 
     def _parse_structured_output(
         self,
         raw_output: Optional[str],
         original_text: str,
         domain_info: DomainClassification,
-        is_truncated: bool = False
+        is_truncated: bool = False,
+        model_error: Optional[str] = None,
     ) -> TriageAnalysis:
         """
         Parses and self-heals structured JSON from the model response.
@@ -373,7 +386,7 @@ class CognitiveTriage:
                         domain=domain_info,
                         reasoning=reasoning or f"Classified as {route.value} by cognitive arbiter.",
                         truncation_detected=is_truncated,
-                        error="error_truncated" if is_truncated else None,
+                        error="error_truncated" if is_truncated else model_error,
                         confidence=0.95
                     )
                 except Exception:
@@ -384,7 +397,7 @@ class CognitiveTriage:
         reason = (
             f"Model output truncated by max_tokens limit ({self.max_tokens} tokens) before structured JSON completed; failed closed to DIRECT_REPLY."
             if is_truncated
-            else "Model output unavailable or malformed; failed closed to DIRECT_REPLY."
+            else (f"{model_error}; failed closed to DIRECT_REPLY." if model_error else "invalid_model_response; failed closed to DIRECT_REPLY.")
         )
         return TriageAnalysis(
             route=CognitiveRoute.DIRECT_REPLY,
@@ -401,6 +414,6 @@ class CognitiveTriage:
             domain=domain_info,
             reasoning=reason,
             truncation_detected=is_truncated,
-            error="error_truncated" if is_truncated else None,
+            error="error_truncated" if is_truncated else (model_error or "invalid_model_response"),
             confidence=0.0,
         )

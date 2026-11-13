@@ -57,6 +57,27 @@ def test_triage_conversational_casual_no_skills_needed():
     assert result.search_query == ""
 
 
+def test_unavailable_model_reports_cause_and_elapsed_time(tmp_path):
+    triage = CognitiveTriage()
+
+    result = triage.analyze("Please inspect the deployment plan", cwd=str(tmp_path))
+
+    assert result.error == "model_unavailable"
+    assert result.model_latency_ms >= 0
+    assert result.reasoning == "model_unavailable; failed closed to DIRECT_REPLY."
+
+
+def test_workspace_inspection_can_be_disabled(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+
+    domain = inspect_workspace_governance(str(repo), enabled=False)
+
+    assert domain.governance_repo_root is None
+    assert domain.is_software_task is False
+
+
 def test_triage_software_task_with_governance_detection():
     def mock_model(prompt: str) -> str:
         return json.dumps({

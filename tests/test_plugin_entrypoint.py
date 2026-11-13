@@ -94,6 +94,31 @@ def test_plugin_disabled_fast_path(tmp_path):
     assert "session_disabled:turn_disabled" not in plugin_entry._session_turns
 
 
+def test_services_refresh_native_skill_inventory_without_cwd_suppression(monkeypatch):
+    from unittest.mock import Mock
+    from neural_context.config import PluginConfig
+
+    import __init__ as plugin_entry
+
+    config = PluginConfig(software_inspection_enabled=False)
+    sidecar = Mock()
+    inventory = ([], [], {}, {}, {0, 1, 2, 3})
+    discover = Mock(return_value=inventory)
+    monkeypatch.setattr(plugin_entry, "_config", config)
+    monkeypatch.setattr(plugin_entry, "_sidecar", sidecar)
+    monkeypatch.setattr(plugin_entry, "_triage", Mock())
+    monkeypatch.setattr(plugin_entry, "_coordinator", Mock())
+    monkeypatch.setattr(plugin_entry, "_receipt_emitter", Mock())
+    monkeypatch.setattr(plugin_entry, "discover_skill_inventory", discover)
+
+    plugin_entry._get_services()
+    plugin_entry._get_services()
+
+    assert discover.call_count == 2
+    discover.assert_called_with(include_project=False)
+    assert sidecar.sync_skills.call_count == 2
+
+
 def test_multichannel_message_extraction():
     import __init__ as plugin_entry
 
