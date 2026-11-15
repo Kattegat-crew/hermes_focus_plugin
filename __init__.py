@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -63,6 +64,7 @@ _receipt_emitter: Optional[ReceiptEmitter] = None
 
 # Thread-safe / session-isolated store for turn state: key -> (TriageAnalysis, RouteResult, platform, model)
 _session_turns: Dict[str, Tuple[TriageAnalysis, RouteResult, str, str]] = {}
+_session_turns_lock = threading.Lock()
 
 
 def extract_message_text(user_message: Any) -> str:
@@ -166,10 +168,11 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
         )
 
         # Store session/turn state isolated from concurrent sessions (bounded to 256 entries)
-        if len(_session_turns) >= 256:
-            oldest_key = next(iter(_session_turns))
-            _session_turns.pop(oldest_key, None)
-        _session_turns[turn_key] = (analysis, result, platform, model_name)
+        with _session_turns_lock:
+            if len(_session_turns) >= 256:
+                oldest_key = next(iter(_session_turns))
+                _session_turns.pop(oldest_key, None)
+            _session_turns[turn_key] = (analysis, result, platform, model_name)
 
         if result.combined_context_block:
             return {"context": result.combined_context_block}
@@ -190,7 +193,8 @@ def on_post_llm_call(response: Any = None, **kwargs: Any) -> None:
     turn_key = f"{session_id}:{turn_id}"
 
     # Retrieve and clean up turn state for this exact turn (no unsafe cross-turn fallback)
-    turn_data = _session_turns.pop(turn_key, None)
+    with _session_turns_lock:
+        turn_data = _session_turns.pop(turn_key, None)
     if turn_data is None:
         return
 

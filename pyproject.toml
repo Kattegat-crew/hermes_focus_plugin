@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "focus"
-version = "0.1.0"
+version = "0.1.1"
 description = "Focus: Cognitive semantic triage, selective entity memory ingestion, and dynamic skill routing for Hermes Agent."
 readme = "README.md"
 requires-python = ">=3.10"

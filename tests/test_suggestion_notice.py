@@ -99,6 +99,7 @@ def test_notice_localized_from_hermes_env(monkeypatch):
 
 def test_notice_localized_from_os_locale(monkeypatch):
     monkeypatch.delenv("HERMES_LANGUAGE", raising=False)
+    monkeypatch.setattr("neural_context.config.get_hermes_language", lambda: "")
     monkeypatch.setenv("LANG", "fr_FR.UTF-8")
     coordinator = ContextCoordinator(config=PluginConfig(), sidecar=None)
     block = coordinator._assemble_context_block(None, None, [], suggested_skill=SUGGESTED)
