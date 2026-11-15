@@ -52,6 +52,7 @@ class PluginConfig(BaseModel):
     extra_memory_dirs: List[str] = Field(default_factory=list)
     excluded_session_sources: List[str] = Field(default_factory=list)
     software_inspection_enabled: bool = True
+    project_scan_paths: List[str] = Field(default_factory=list)
     sidecar_db_path: str = ""
     receipts_path: str = ""
     timeout_ms: int = 0  # 0 = no plugin-imposed deadline; provider limits still apply
@@ -67,7 +68,7 @@ class PluginConfig(BaseModel):
                 "enabled", "pre_hook_enabled", "router_backend", "max_context_tokens",
                 "selective_memory_enabled", "memory_token_budget",
                 "memory_db_uri", "extra_memory_dirs", "excluded_session_sources",
-                "software_inspection_enabled", "sidecar_db_path", "receipts_path", "timeout_ms",
+                "software_inspection_enabled", "project_scan_paths", "sidecar_db_path", "receipts_path", "timeout_ms",
             ]
             for f in fields:
                 default_val = getattr(default_inst, f)
@@ -105,6 +106,19 @@ class PluginConfig(BaseModel):
             ]
         elif raw_sources is None:
             config_data["excluded_session_sources"] = []
+
+        # Normalize project_scan_paths
+        raw_scan_paths = config_data.get("project_scan_paths")
+        if isinstance(raw_scan_paths, str):
+            config_data["project_scan_paths"] = [
+                d.strip() for d in raw_scan_paths.split(",") if d.strip()
+            ]
+        elif isinstance(raw_scan_paths, (list, tuple)):
+            config_data["project_scan_paths"] = [
+                str(d).strip() for d in raw_scan_paths if str(d).strip()
+            ]
+        elif raw_scan_paths is None:
+            config_data["project_scan_paths"] = []
 
         data_dir = get_plugin_data_dir()
 

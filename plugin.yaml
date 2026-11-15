@@ -67,6 +67,10 @@ config_schema:
   software_inspection_enabled:
     type: bool
     default: true
+  project_scan_paths:
+    type: list
+    default: []
+    description: "Optional list of root directories containing software projects (e.g. ['~/projects', '~/workspace'])."
   sidecar_db_path:
     type: str
     default: ""

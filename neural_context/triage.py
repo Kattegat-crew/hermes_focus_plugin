@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .config import get_hermes_language
 from .models import CognitiveRoute, DomainClassification, MemoryProbe, TriageAnalysis
+from .workspace import inspect_workspace_governance, resolve_workspace_dir
 
 
 TRIAGE_SYSTEM_PROMPT = """You are the Cognitive Semantic Arbiter for Hermes Agent's Neural Context Engine.
@@ -81,47 +82,6 @@ OUTPUT SPECIFICATION (Pure JSON only):
 """
 
 
-def inspect_workspace_governance(cwd: Optional[str] = None, enabled: bool = True) -> DomainClassification:
-    """
-    Inspects whether the current workspace is a documented software repository
-    with sovereign governance (AGENTS.md, .skills/, .agents/skills/).
-    """
-    if not enabled or not cwd:
-        return DomainClassification(is_software_task=False)
-    root = Path(cwd).resolve()
-    current = root
-
-    governance_root: Optional[str] = None
-    stack: List[str] = []
-
-    while current != current.parent:
-        has_agents = (current / "AGENTS.md").is_file() or (current / "CLAUDE.md").is_file()
-        has_skills = (current / ".skills").is_dir() or (current / ".agents" / "skills").is_dir()
-        has_git = (current / ".git").is_dir()
-
-        if has_agents or has_skills or has_git:
-            governance_root = str(current)
-            break
-        current = current.parent
-
-    check_dir = Path(governance_root) if governance_root else root
-    if (check_dir / "pyproject.toml").is_file() or (check_dir / "setup.py").is_file():
-        stack.append("python")
-    if (check_dir / "package.json").is_file():
-        stack.append("node")
-    if (check_dir / "Cargo.toml").is_file():
-        stack.append("rust")
-    if (check_dir / "Dockerfile").is_file() or (check_dir / "docker-compose.yml").is_file():
-        stack.append("docker")
-
-    is_sw = bool(governance_root or stack)
-    return DomainClassification(
-        is_software_task=is_sw,
-        detected_stack=stack,
-        governance_repo_root=governance_root
-    )
-
-
 def _is_truncated_completion(text: Optional[str]) -> bool:
     """Returns True if model completion was truncated (empty string or unclosed JSON)."""
     if text is None:
@@ -158,9 +118,14 @@ class CognitiveTriage:
         user_message: str,
         cwd: Optional[str] = None,
         software_inspection_enabled: bool = True,
+        project_scan_paths: Optional[List[Union[str, Path]]] = None,
     ) -> TriageAnalysis:
         clean_text = user_message.strip()
-        domain_info = inspect_workspace_governance(cwd, enabled=software_inspection_enabled)
+        domain_info = inspect_workspace_governance(
+            cwd,
+            enabled=software_inspection_enabled,
+            project_scan_paths=project_scan_paths,
+        )
 
         # 1. Execute cognitive interpretation via model
         model_started = time.perf_counter()
@@ -172,6 +137,24 @@ class CognitiveTriage:
             llm_output, clean_text, domain_info, is_truncated=is_truncated, model_error=model_error
         )
         analysis.model_latency_ms = model_elapsed_ms
+
+        # 3. Post-triage multi-project entity workspace resolution
+        # If cwd is a static bot directory (Discord/Telegram), resolve named entities against project_scan_paths
+        if software_inspection_enabled and project_scan_paths and analysis.extracted_entities:
+            resolved_domain = inspect_workspace_governance(
+                cwd=cwd,
+                enabled=True,
+                entities=analysis.extracted_entities,
+                project_scan_paths=project_scan_paths,
+            )
+            if resolved_domain.is_software_task and resolved_domain.resolved_workspace_path:
+                analysis.domain = resolved_domain
+                # If triage classified as generic procedural task without client reference, but target
+                # entity is a verified sovereign workspace, upgrade to ENRICHED_TASK
+                if analysis.route == CognitiveRoute.SKILL_ONLY:
+                    analysis.route = CognitiveRoute.ENRICHED_TASK
+                    analysis.needs_memory = True
+
         return analysis
 
     def _call_model(self, user_text: str) -> tuple[Optional[str], bool, Optional[str]]:

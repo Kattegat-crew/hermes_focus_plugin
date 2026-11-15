@@ -72,6 +72,10 @@ class DomainClassification(BaseModel):
         default=None,
         description="Path to git root if workspace contains AGENTS.md or local .skills/ directory."
     )
+    resolved_workspace_path: Optional[str] = Field(
+        default=None,
+        description="Resolved path of the target software project workspace if distinct from cwd."
+    )
 
 
 class TriageAnalysis(BaseModel):

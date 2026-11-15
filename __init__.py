@@ -154,13 +154,27 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
         turn_config = PluginConfig.load_from_ctx(ctx) if ctx is not None else config
         cwd = kwargs.get("cwd") or _ctx_cwd(ctx)
-        analysis = triage.analyze(
-            text, cwd=cwd, software_inspection_enabled=turn_config.software_inspection_enabled
+        analyze_kwargs: Dict[str, Any] = {
+            "software_inspection_enabled": turn_config.software_inspection_enabled
+        }
+        try:
+            import inspect
+            sig = inspect.signature(triage.analyze)
+            if "project_scan_paths" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                analyze_kwargs["project_scan_paths"] = turn_config.project_scan_paths
+        except Exception:
+            pass
+
+        analysis = triage.analyze(text, cwd=cwd, **analyze_kwargs)
+        effective_cwd = (
+            analysis.domain.resolved_workspace_path
+            if (analysis.domain and analysis.domain.resolved_workspace_path)
+            else cwd
         )
         result = coordinator.execute(
             analysis,
             user_message=text,
-            cwd=cwd,
+            cwd=effective_cwd,
             session_id=session_id or None,
             memory_db_uri=turn_config.memory_db_uri,
             extra_memory_dirs=turn_config.extra_memory_dirs,
@@ -264,13 +278,28 @@ def register(ctx: Any) -> None:
             query = args.get("query", "")
             if not query:
                 return "Error: query is required."
-            _, _, triage, coordinator, _ = _get_services(ctx)
+            cfg, _, triage, coordinator, _ = _get_services(ctx)
+            turn_config = PluginConfig.load_from_ctx(ctx) if ctx is not None else cfg
             cwd = kw.get("cwd") or _ctx_cwd(ctx)
-            analysis = triage.analyze(
-                query, cwd=cwd, software_inspection_enabled=_config.software_inspection_enabled
+            tool_kwargs: Dict[str, Any] = {
+                "software_inspection_enabled": turn_config.software_inspection_enabled
+            }
+            try:
+                import inspect
+                sig = inspect.signature(triage.analyze)
+                if "project_scan_paths" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    tool_kwargs["project_scan_paths"] = turn_config.project_scan_paths
+            except Exception:
+                pass
+
+            analysis = triage.analyze(query, cwd=cwd, **tool_kwargs)
+            effective_cwd = (
+                analysis.domain.resolved_workspace_path
+                if (analysis.domain and analysis.domain.resolved_workspace_path)
+                else cwd
             )
             result = coordinator.execute(
-                analysis, user_message=query, cwd=cwd, session_id=args.get("session_id") or kw.get("session_id")
+                analysis, user_message=query, cwd=effective_cwd, session_id=args.get("session_id") or kw.get("session_id")
             )
             selected = (
                 ", ".join(s.name for s in result.selected_skills)

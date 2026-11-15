@@ -1372,6 +1372,27 @@ class SelectiveMemoryRetriever:
                 return True
             return False
 
+        # Stage 0: Entity-targeted pass when an entity column was profiled and clean_entities are provided
+        if entity_col_orig and clean_entities:
+            ent_clauses: List[str] = []
+            ent_params: List[Any] = []
+            for ent in clean_entities[:4]:
+                ent_clauses.append(f'lower(CAST({_qcol(entity_col_orig)} AS TEXT)) = lower(?)')
+                ent_params.append(ent)
+            if ent_clauses:
+                ent_sql = (
+                    f'SELECT {", ".join(select_cols)} FROM "{safe_tbl}" '
+                    f'WHERE {active_row_filter[7:] + " AND " if active_row_filter else ""}'
+                    f'({" OR ".join(ent_clauses)}){order_sql} LIMIT 40'
+                )
+                try:
+                    cursor.execute(ent_sql, ent_params)
+                    ent_rows = cursor.fetchall()
+                    if ent_rows:
+                        _collect_rows(ent_rows)
+                except Exception:
+                    pass
+
         # Stage 1: Seed fetch
         stage1_hit = _query_terms_pass(search_terms, limit=120)
 
@@ -1486,11 +1507,12 @@ class SelectiveMemoryRetriever:
                     bind_params: Dict[str, Any] = {}
                     p_idx = 0
                     for term in search_terms[:8]:
+                        esc_term = _escape_sql_like(term)
                         for scol in search_cols:
                             pname = f"p{p_idx}"
                             p_idx += 1
-                            like_clauses.append(f'CAST({_q_identifier(scol)} AS TEXT) LIKE :{pname}')
-                            bind_params[pname] = f"%{term}%"
+                            like_clauses.append(f"CAST({_q_identifier(scol)} AS TEXT) LIKE :{pname} ESCAPE '\\\\'")
+                            bind_params[pname] = f"%{esc_term}%"
 
                     if not like_clauses:
                         continue

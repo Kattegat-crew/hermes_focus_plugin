@@ -242,6 +242,8 @@ class GraphRouter(SkillRouterBackend):
             if uncovered or (h_score >= top_score * 0.80 and bool(cand_concepts)):
                 winners.append(cand)
                 covered_concepts.update(cand_concepts)
+                if len(winners) >= 3:
+                    break
 
         return winners
 
@@ -421,7 +423,12 @@ class ContextCoordinator:
             analysis.route not in (CognitiveRoute.DIRECT_REPLY, CognitiveRoute.MEMORY_ONLY) and analysis.needs_skills
         ):
             query_parts = []
-            query_concepts = list(dict.fromkeys([*analysis.semantic_concepts, *analysis.required_capabilities]))
+            stack_concepts = [
+                s.strip().lower()
+                for s in (analysis.domain.detected_stack if analysis.domain else [])
+                if s.strip()
+            ]
+            query_concepts = list(dict.fromkeys([*analysis.semantic_concepts, *analysis.required_capabilities, *stack_concepts]))
             if query_concepts:
                 query_parts.append(" ".join(query_concepts))
 
