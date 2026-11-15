@@ -349,6 +349,7 @@ class ContextCoordinator:
             token_budget=config.memory_token_budget,
             memory_db_uri=config.memory_db_uri,
             extra_memory_dirs=config.extra_memory_dirs,
+            excluded_session_sources=config.excluded_session_sources,
         )
 
         if config.router_backend == "graph":
@@ -366,6 +367,7 @@ class ContextCoordinator:
         session_id: Optional[str] = None,
         memory_db_uri: Optional[str] = None,
         extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
+        excluded_session_sources: Optional[List[str]] = None,
     ) -> RouteResult:
         start_time = time.perf_counter()
 
@@ -401,6 +403,7 @@ class ContextCoordinator:
                 session_id=session_id,
                 memory_db_uri=memory_db_uri or self.config.memory_db_uri,
                 extra_memory_dirs=extra_memory_dirs if extra_memory_dirs is not None else self.config.extra_memory_dirs,
+                excluded_session_sources=excluded_session_sources if excluded_session_sources is not None else self.config.excluded_session_sources,
             )
             if memories:
                 memory_hints = " ".join([f"{m.entity}: {m.fact}" if m.entity else m.fact for m in memories])

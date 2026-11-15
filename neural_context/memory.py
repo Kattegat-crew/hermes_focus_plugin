@@ -356,6 +356,35 @@ def _resolve_memory_db_password() -> Optional[str]:
     return val if val else None
 
 
+def _get_host_excluded_session_sources() -> Set[str]:
+    """Dynamically query the active Hermes host for non-interactive / automated session sources.
+    Avoids hardcoding static source lists in the plugin, delegating authority to Hermes core
+    or custom profile configurations."""
+    try:
+        from tools import session_search_tool
+
+        sources = getattr(session_search_tool, "_HIDDEN_SESSION_SOURCES", None)
+        if sources and isinstance(sources, (list, tuple, set)):
+            return {str(s).strip().lower() for s in sources if str(s).strip()}
+    except Exception:
+        pass
+    return set()
+
+
+def _get_host_compaction_prefixes() -> Tuple[str, ...]:
+    """Dynamically query the active Hermes host for compaction/summary message prefixes.
+    Avoids hardcoding language-specific strings in the plugin engine."""
+    try:
+        from tools import session_search_tool
+
+        prefixes = getattr(session_search_tool, "_COMPACTION_PREFIXES", None)
+        if prefixes and isinstance(prefixes, (list, tuple, set)):
+            return tuple(str(p) for p in prefixes if str(p).strip())
+    except Exception:
+        pass
+    return ()
+
+
 class SelectiveMemoryRetriever:
     """
     Hexagonal Bipartite Concept-Entity-Fact Graph Memory Retriever.
@@ -372,11 +401,15 @@ class SelectiveMemoryRetriever:
         token_budget: int = 0,
         memory_db_uri: str = "",
         extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
+        excluded_session_sources: Optional[List[str]] = None,
     ):
         self.token_budget = token_budget  # 0 = unlimited by default, preserves full context
         self.memory_db_uri = memory_db_uri
         self.extra_memory_dirs = [
             Path(p) for p in (extra_memory_dirs or []) if str(p).strip()
+        ]
+        self.excluded_session_sources = [
+            str(s).strip().lower() for s in (excluded_session_sources or []) if str(s).strip()
         ]
 
     def retrieve(
@@ -387,6 +420,7 @@ class SelectiveMemoryRetriever:
         session_id: Optional[str] = None,
         memory_db_uri: Optional[str] = None,
         extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
+        excluded_session_sources: Optional[List[str]] = None,
     ) -> List[MemoryItem]:
         clean_entities = [e.strip() for e in (entities or []) if len(e.strip()) >= 2]
         if probe and probe.entity and probe.entity.strip() not in clean_entities:
@@ -582,6 +616,12 @@ class SelectiveMemoryRetriever:
             for node in _load_file_fact_nodes(fpath):
                 _register_node(node)
 
+        effective_excluded_sources = (
+            [str(s).strip().lower() for s in excluded_session_sources if str(s).strip()]
+            if excluded_session_sources is not None
+            else self.excluded_session_sources
+        )
+
         for db_path in sqlite_candidates:
             for node in self._extract_sqlite_fact_nodes(
                 db_path,
@@ -589,6 +629,7 @@ class SelectiveMemoryRetriever:
                 topic_terms=topic_terms,
                 specific_topic_terms=specific_topic_terms,
                 active_session_id=session_id,
+                excluded_session_sources=effective_excluded_sources,
             ):
                 _register_node(node)
 
@@ -956,6 +997,9 @@ class SelectiveMemoryRetriever:
         val = " ".join(str(raw_text or "").split()).strip()
         if len(val) < 10 or _INJECTION_PATTERNS.search(val):
             return None
+        host_compaction = _get_host_compaction_prefixes()
+        if host_compaction and any(val.startswith(p) for p in host_compaction):
+            return None
         if len(val) > max_chars:
             val = val[:max_chars].rstrip() + "..."
         norm_val = normalize_text_for_matching(val)
@@ -979,6 +1023,7 @@ class SelectiveMemoryRetriever:
         topic_terms: List[str],
         specific_topic_terms: Optional[List[str]] = None,
         active_session_id: Optional[str] = None,
+        excluded_session_sources: Optional[List[str]] = None,
     ) -> List[_MemoryFactNode]:
         """
         Read-only universal SQLite adapter:
@@ -1021,6 +1066,7 @@ class SelectiveMemoryRetriever:
                                 clean_entities=clean_entities,
                                 specific_topic_terms=specific_topic_terms,
                                 active_session_id=active_session_id,
+                                excluded_session_sources=excluded_session_sources,
                             )
                         )
 
@@ -1059,6 +1105,7 @@ class SelectiveMemoryRetriever:
         clean_entities: Optional[List[str]] = None,
         specific_topic_terms: Optional[List[str]] = None,
         active_session_id: Optional[str] = None,
+        excluded_session_sources: Optional[List[str]] = None,
     ) -> List[_MemoryFactNode]:
         nodes: List[_MemoryFactNode] = []
         seen_contents: Set[str] = set()
@@ -1078,8 +1125,6 @@ class SelectiveMemoryRetriever:
         where_clauses = [
             "m.content IS NOT NULL",
             "length(m.content) >= 10",
-            "m.content NOT LIKE '[CONTEXT COMPACTION%'",
-            "m.content NOT LIKE '[CONTEXT SUMMARY]:%'",
         ]
         base_params: List[Any] = []
         if has_role:
@@ -1097,7 +1142,17 @@ class SelectiveMemoryRetriever:
                 cursor.execute(f'PRAGMA table_info("{table_set_lower["sessions"]}")')
                 sess_cols = {str(r[1]).lower() for r in cursor.fetchall()}
                 if "source" in sess_cols:
-                    where_clauses.append("(s.source IS NULL OR s.source NOT IN ('kanban', 'subagent', 'tool'))")
+                    effective_excluded = set(
+                        excluded_session_sources
+                        if excluded_session_sources is not None
+                        else self.excluded_session_sources
+                    )
+                    if not effective_excluded:
+                        effective_excluded = _get_host_excluded_session_sources()
+                    if effective_excluded:
+                        placeholders = ", ".join("?" for _ in effective_excluded)
+                        where_clauses.append(f"(s.source IS NULL OR lower(s.source) NOT IN ({placeholders}))")
+                        base_params.extend(sorted(effective_excluded))
             except Exception:
                 pass
 

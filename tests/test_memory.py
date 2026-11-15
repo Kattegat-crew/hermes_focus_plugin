@@ -270,7 +270,10 @@ def test_memory_fail_closed_on_corrupt_files(tmp_path: Path, monkeypatch):
     assert items == []
 
 
-def test_hermes_state_db_source_filter_excludes_kanban_subagent_tool(tmp_path: Path):
+def test_hermes_state_db_source_filter_configured_and_dynamic(tmp_path: Path, monkeypatch):
+    import sys
+    import types
+
     db_path = tmp_path / "state.db"
     with sqlite3.connect(db_path) as conn:
         conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, source TEXT)")
@@ -284,9 +287,8 @@ def test_hermes_state_db_source_filter_excludes_kanban_subagent_tool(tmp_path: P
             "INSERT INTO sessions (id, title, source) VALUES (?, ?, ?)",
             [
                 ("s-chat", "Chat Session", "chat"),
-                ("s-kanban", "Kanban Automation", "kanban"),
-                ("s-subagent", "Subagent Execution", "subagent"),
-                ("s-tool", "Tool Integration", "tool"),
+                ("s-auto1", "Automation 1", "automation_alpha"),
+                ("s-auto2", "Automation 2", "automation_beta"),
             ],
         )
         # Messages
@@ -294,10 +296,66 @@ def test_hermes_state_db_source_filter_excludes_kanban_subagent_tool(tmp_path: P
             "INSERT INTO messages (id, role, content, session_id, timestamp, deleted_at, active) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
                 (1, "user", "AcmeCorp regular interactive chat discussion", "s-chat", "2026-01-01", None, 1),
-                (2, "user", "AcmeCorp automated kanban card move notification", "s-kanban", "2026-01-02", None, 1),
-                (3, "user", "AcmeCorp subagent worker delegated task payload", "s-subagent", "2026-01-03", None, 1),
-                (4, "user", "AcmeCorp tool execution internal session log", "s-tool", "2026-01-04", None, 1),
-                (5, "user", "[CONTEXT COMPACTION] AcmeCorp summarized context block", "s-chat", "2026-01-05", None, 1),
+                (2, "user", "AcmeCorp automated task payload from alpha", "s-auto1", "2026-01-02", None, 1),
+                (3, "user", "AcmeCorp automated worker log from beta", "s-auto2", "2026-01-03", None, 1),
+            ],
+        )
+        cursor = conn.cursor()
+
+        # 1. Configured exclusion filter without static hardcoding
+        retriever_configured = SelectiveMemoryRetriever(
+            excluded_session_sources=["automation_alpha", "automation_beta"]
+        )
+        nodes = retriever_configured._query_hermes_state_db(
+            cursor,
+            "state.db",
+            "messages",
+            {"messages": "messages", "sessions": "sessions"},
+            ["AcmeCorp"],
+        )
+        facts = [node.fact for node in nodes]
+        assert any("interactive chat discussion" in fact for fact in facts)
+        assert not any("automated task payload" in fact for fact in facts)
+        assert not any("automated worker log" in fact for fact in facts)
+
+        # 2. Dynamic host delegation via tools.session_search_tool (no hardcoded lists in plugin)
+        fake_tool = types.ModuleType("tools.session_search_tool")
+        fake_tool._HIDDEN_SESSION_SOURCES = ("automation_alpha",)
+        tools_mod = types.ModuleType("tools")
+        tools_mod.session_search_tool = fake_tool
+        monkeypatch.setitem(sys.modules, "tools", tools_mod)
+        monkeypatch.setitem(sys.modules, "tools.session_search_tool", fake_tool)
+
+        retriever_dynamic = SelectiveMemoryRetriever(excluded_session_sources=[])
+        nodes_dynamic = retriever_dynamic._query_hermes_state_db(
+            cursor,
+            "state.db",
+            "messages",
+            {"messages": "messages", "sessions": "sessions"},
+            ["AcmeCorp"],
+        )
+        facts_dynamic = [node.fact for node in nodes_dynamic]
+        assert any("interactive chat discussion" in fact for fact in facts_dynamic)
+        assert not any("automated task payload" in fact for fact in facts_dynamic)
+        assert any("automated worker log from beta" in fact for fact in facts_dynamic)
+
+
+def test_multilingual_facts_retrieval_without_static_word_blacklists(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, source TEXT)")
+        conn.execute(
+            "CREATE TABLE messages ("
+            "id INTEGER PRIMARY KEY, role TEXT, content TEXT, session_id TEXT, "
+            "timestamp TEXT, deleted_at TEXT, active INTEGER DEFAULT 1)"
+        )
+        conn.execute("INSERT INTO sessions VALUES ('s-multi', 'Multilingual Chat', 'chat')")
+        conn.executemany(
+            "INSERT INTO messages (id, role, content, session_id, timestamp, deleted_at, active) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (1, "user", "AcmeCorp facturación electrónica en Bogotá con impuestos DIAN validados", "s-multi", "2026-01-01", None, 1),
+                (2, "user", "AcmeCorp facture électronique à Paris avec TVA validée", "s-multi", "2026-01-02", None, 1),
+                (3, "user", "AcmeCorp 東京オフィスの請求システムと消費税設定が完了しました", "s-multi", "2026-01-03", None, 1),
             ],
         )
         cursor = conn.cursor()
@@ -310,11 +368,9 @@ def test_hermes_state_db_source_filter_excludes_kanban_subagent_tool(tmp_path: P
         )
 
     facts = [node.fact for node in nodes]
-    assert any("interactive chat discussion" in fact for fact in facts)
-    assert not any("kanban card move" in fact for fact in facts)
-    assert not any("subagent worker" in fact for fact in facts)
-    assert not any("tool execution internal" in fact for fact in facts)
-    assert not any("[CONTEXT COMPACTION]" in fact for fact in facts)
+    assert any("facturación electrónica en Bogotá" in fact for fact in facts)
+    assert any("facture électronique à Paris" in fact for fact in facts)
+    assert any("東京オフィスの請求システム" in fact for fact in facts)
 
 
 def test_resolve_memory_db_password_honors_secret_scope(monkeypatch):
@@ -348,8 +404,11 @@ def test_plugin_config_loads_memory_settings_from_ctx():
                 return "postgresql://user@remote-host:5432/memorydb"
             if key == "extra_memory_dirs":
                 return ["/data/extra1", "/data/extra2"]
+            if key == "excluded_session_sources":
+                return ["kanban", "subagent", "tool"]
             return default
 
     cfg = PluginConfig.load_from_ctx(MockCtx())
     assert cfg.memory_db_uri == "postgresql://user@remote-host:5432/memorydb"
     assert cfg.extra_memory_dirs == ["/data/extra1", "/data/extra2"]
+    assert cfg.excluded_session_sources == ["kanban", "subagent", "tool"]

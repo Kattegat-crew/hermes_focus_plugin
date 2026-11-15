@@ -50,6 +50,7 @@ class PluginConfig(BaseModel):
     memory_token_budget: int = 0  # 0 = unlimited by default, preserves all relevant facts
     memory_db_uri: str = ""
     extra_memory_dirs: List[str] = Field(default_factory=list)
+    excluded_session_sources: List[str] = Field(default_factory=list)
     software_inspection_enabled: bool = True
     sidecar_db_path: str = ""
     receipts_path: str = ""
@@ -65,7 +66,7 @@ class PluginConfig(BaseModel):
             fields = [
                 "enabled", "pre_hook_enabled", "router_backend", "max_context_tokens",
                 "selective_memory_enabled", "memory_token_budget",
-                "memory_db_uri", "extra_memory_dirs",
+                "memory_db_uri", "extra_memory_dirs", "excluded_session_sources",
                 "software_inspection_enabled", "sidecar_db_path", "receipts_path", "timeout_ms",
             ]
             for f in fields:
@@ -91,6 +92,19 @@ class PluginConfig(BaseModel):
             ]
         elif raw_extra_dirs is None:
             config_data["extra_memory_dirs"] = []
+
+        # Normalize excluded_session_sources
+        raw_sources = config_data.get("excluded_session_sources")
+        if isinstance(raw_sources, str):
+            config_data["excluded_session_sources"] = [
+                s.strip().lower() for s in raw_sources.split(",") if s.strip()
+            ]
+        elif isinstance(raw_sources, (list, tuple, set)):
+            config_data["excluded_session_sources"] = [
+                str(s).strip().lower() for s in raw_sources if str(s).strip()
+            ]
+        elif raw_sources is None:
+            config_data["excluded_session_sources"] = []
 
         data_dir = get_plugin_data_dir()
 

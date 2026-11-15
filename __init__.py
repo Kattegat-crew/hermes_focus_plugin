@@ -162,6 +162,7 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
             session_id=session_id or None,
             memory_db_uri=turn_config.memory_db_uri,
             extra_memory_dirs=turn_config.extra_memory_dirs,
+            excluded_session_sources=turn_config.excluded_session_sources,
         )
 
         # Store session/turn state isolated from concurrent sessions (bounded to 256 entries)
