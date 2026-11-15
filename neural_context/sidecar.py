@@ -291,93 +291,65 @@ def discover_skill_inventory(include_project: bool = True):
     """Return the active native skill catalog and its source provenance.
 
     Native Hermes owns roots, project trust/quarantine, exclusions, and duplicate
-    precedence. If that contract is not importable, only the active profile's
-    skills directory is scanned; project sources are never guessed from cwd.
+    precedence via published tools.skills_tool APIs (find_all_skills, locate_skill,
+    skill_search_dirs).
     """
     try:
-        from agent import skill_utils
-        required = (
-            "get_skill_search_roots", "iter_skill_index_files", "resolve_skill_catalog",
-            "parse_frontmatter", "TIER_PROJECT", "TIER_LOCAL", "TIER_CREATE_DIR", "TIER_EXTERNAL",
-            "get_disabled_skill_names", "is_disabled_entry", "skill_matches_platform",
-            "skill_matches_environment", "skill_matches_apps",
-        )
-        if not all(hasattr(skill_utils, name) for name in required):
-            raise ImportError("native Hermes skill discovery contract is incomplete")
-        roots = skill_utils.get_skill_search_roots(include_project=include_project)
-        entries = []
-        source_info = {}
-        project_paths = []
-        for tier, root in roots:
-            root = Path(root)
-            if not root.is_dir():
+        from tools.skills_tool import find_all_skills, locate_skill, skill_search_dirs
+
+        roots_tuples, _active_dir = skill_search_dirs()
+        # roots_tuples is [(tier, dir), ...] in precedence order
+        # tier 0 is TIER_PROJECT; filter out project tier if include_project is False
+        roots = [(t, d) for t, d in roots_tuples if include_project or t != 0]
+
+        all_skills = find_all_skills()
+        paths: List[Path] = []
+        project_paths: List[Path] = []
+        source_info: Dict[Path, Tuple[int, Path]] = {}
+        names: Dict[Path, str] = {}
+        tiers_set: Set[int] = {t for t, _ in roots} if roots else {0, 1, 2, 3}
+
+        for sk in all_skills:
+            load_name = sk.get("name")
+            if not load_name:
                 continue
-            if tier == skill_utils.TIER_PROJECT:
-                project_iter = getattr(skill_utils, "iter_project_skill_files", None)
-                if not callable(project_iter):
-                    raise ImportError("native project quarantine iterator is unavailable")
-                files = project_iter(root)
-            else:
-                files = skill_utils.iter_skill_index_files(root, "SKILL.md")
-            for path in files:
-                path = Path(path)
-                try:
-                    content = path.read_text(encoding="utf-8-sig")
-                    frontmatter, _ = skill_utils.parse_frontmatter(content)
-                except Exception:
-                    continue
-                name = str(frontmatter.get("name") or path.parent.name).strip()
-                if not name:
-                    continue
-                entry = {"name": name, "tier": tier, "root": root, "path": path}
-                try:
-                    offerable = (
-                        skill_utils.skill_matches_platform(frontmatter)
-                        and skill_utils.skill_matches_environment(frontmatter)
-                        and skill_utils.skill_matches_apps(frontmatter)
-                    )
-                except Exception:
-                    offerable = False
-                if not offerable:
-                    continue
-                entries.append(entry)
-                if tier == skill_utils.TIER_PROJECT:
-                    project_paths.append(path)
-        resolved = skill_utils.resolve_skill_catalog(entries)
-        disabled = skill_utils.get_disabled_skill_names()
-        selected = [
-            entry for entry in resolved
-            if entry.get("status") == "unique" or (
-                entry.get("status") == "ambiguous" and entry.get("load_name")
-            )
-            if not skill_utils.is_disabled_entry(entry, disabled)
-        ]
-        paths = [Path(entry["path"]) for entry in selected]
-        names = {Path(entry["path"]): str(entry.get("load_name") or entry["name"]) for entry in selected}
-        selected_info = {
-            Path(entry["path"]): (entry["tier"], Path(entry["root"]))
-            for entry in selected
-        }
-        selected_project = [path for path in paths if selected_info[path][0] == skill_utils.TIER_PROJECT]
-        tiers = {
-            skill_utils.TIER_PROJECT, skill_utils.TIER_LOCAL,
-            skill_utils.TIER_CREATE_DIR, skill_utils.TIER_EXTERNAL,
-        }
-        return paths, selected_project, selected_info, names, tiers
+            err, sdir, smd = locate_skill(load_name, None, roots)
+            if err or not smd:
+                continue
+            path = Path(smd).resolve()
+            if not path.is_file() or path in source_info:
+                continue
+
+            matched_tier = 1
+            matched_root = path.parent
+            for t, r in roots:
+                r_resolved = Path(r).resolve()
+                if path.is_relative_to(r_resolved):
+                    matched_tier = t
+                    matched_root = r_resolved
+                    break
+
+            paths.append(path)
+            names[path] = load_name
+            source_info[path] = (matched_tier, matched_root)
+            if matched_tier == 0:
+                project_paths.append(path)
+
+        return paths, project_paths, source_info, names, tiers_set
     except Exception as exc:
         # Keep the user's profile-level catalog available, but never approximate
         # project trust, quarantine, or tier precedence with a raw workspace walk.
         logger.warning("Native skill discovery unavailable; using profile skills only: %s", exc)
         try:
             from hermes_constants import get_skills_dir
+
             root = Path(get_skills_dir())
-            iterator = getattr(locals().get("skill_utils"), "iter_skill_index_files", None)
-            paths = list(iterator(root, "SKILL.md")) if callable(iterator) and root.is_dir() else []
+            paths = list(root.glob("**/SKILL.md")) if root.is_dir() else []
         except Exception:
             return [], [], {}, {}, {0, 1, 2, 3}
         paths = [Path(path) for path in paths]
         info = {path: (1, root) for path in paths}
-        return paths, [], info, {}, {0, 1, 2, 3}
+        return paths, [], info, {path: path.parent.name for path in paths}, {0, 1, 2, 3}
 
 
 class SidecarIndex:

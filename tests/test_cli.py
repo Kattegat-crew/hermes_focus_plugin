@@ -92,12 +92,12 @@ def test_cli_empty_trusted_subtree_still_prunes_removed_skill(tmp_path, monkeypa
     trusted_root = tmp_path / "profile" / "skills"
     removed_source = trusted_root / "gone"
     removed_source.mkdir(parents=True)
-    fake = types.ModuleType("agent.skill_utils")
-    fake.get_skill_search_roots = lambda include_project=True: [(1, trusted_root)]
-    agent = types.ModuleType("agent")
-    agent.skill_utils = fake
-    monkeypatch.setitem(sys.modules, "agent", agent)
-    monkeypatch.setitem(sys.modules, "agent.skill_utils", fake)
+    fake = types.ModuleType("tools.skills_tool")
+    fake.skill_search_dirs = lambda: ([(1, trusted_root)], trusted_root)
+    tools = types.ModuleType("tools")
+    tools.skills_tool = fake
+    monkeypatch.setitem(sys.modules, "tools", tools)
+    monkeypatch.setitem(sys.modules, "tools.skills_tool", fake)
     monkeypatch.setattr(cli, "discover_skill_inventory", lambda **_: ([], [], {}, {}, {0, 1, 2, 3}))
     index = Mock()
 

@@ -203,16 +203,22 @@ def test_nested_subdirectories_and_custom_env_memory(tmp_path: Path, monkeypatch
     )
 
     monkeypatch.setattr("neural_context.memory.get_hermes_home", lambda: hermes_home)
+    # Bare env is ignored per security policy: Redis is NOT found without explicit extra_memory_dirs
     monkeypatch.setenv("HERMES_MEMORY_DIR", str(custom_dir))
 
     retriever = SelectiveMemoryRetriever(token_budget=300)
 
-    # Search for Stripe
+    # Search for Stripe (from hermes_home/memories/archive/2026)
     items_stripe = retriever.retrieve(entities=["Stripe"], cwd=str(cwd))
     assert any("Stripe integration uses Webhook" in it.fact for it in items_stripe)
 
-    # Search for Redis via custom dir
-    items_redis = retriever.retrieve(entities=["Redis"], cwd=str(cwd))
+    # Bare env is ignored:
+    items_redis_ignored = retriever.retrieve(entities=["Redis"], cwd=str(cwd))
+    assert not any("Redis cluster is sharded" in it.fact for it in items_redis_ignored)
+
+    # Search for Redis via configured extra_memory_dirs (plugin setting)
+    retriever_configured = SelectiveMemoryRetriever(token_budget=300, extra_memory_dirs=[custom_dir])
+    items_redis = retriever_configured.retrieve(entities=["Redis"], cwd=str(cwd))
     assert any("Redis cluster is sharded" in it.fact for it in items_redis)
 
 
@@ -262,3 +268,88 @@ def test_memory_fail_closed_on_corrupt_files(tmp_path: Path, monkeypatch):
     # Must fail closed gracefully and return empty list without crashing
     items = retriever.retrieve(entities=["Whatever"], cwd=str(cwd))
     assert items == []
+
+
+def test_hermes_state_db_source_filter_excludes_kanban_subagent_tool(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, source TEXT)")
+        conn.execute(
+            "CREATE TABLE messages ("
+            "id INTEGER PRIMARY KEY, role TEXT, content TEXT, session_id TEXT, "
+            "timestamp TEXT, deleted_at TEXT, active INTEGER DEFAULT 1)"
+        )
+        # Sessions
+        conn.executemany(
+            "INSERT INTO sessions (id, title, source) VALUES (?, ?, ?)",
+            [
+                ("s-chat", "Chat Session", "chat"),
+                ("s-kanban", "Kanban Automation", "kanban"),
+                ("s-subagent", "Subagent Execution", "subagent"),
+                ("s-tool", "Tool Integration", "tool"),
+            ],
+        )
+        # Messages
+        conn.executemany(
+            "INSERT INTO messages (id, role, content, session_id, timestamp, deleted_at, active) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (1, "user", "AcmeCorp regular interactive chat discussion", "s-chat", "2026-01-01", None, 1),
+                (2, "user", "AcmeCorp automated kanban card move notification", "s-kanban", "2026-01-02", None, 1),
+                (3, "user", "AcmeCorp subagent worker delegated task payload", "s-subagent", "2026-01-03", None, 1),
+                (4, "user", "AcmeCorp tool execution internal session log", "s-tool", "2026-01-04", None, 1),
+                (5, "user", "[CONTEXT COMPACTION] AcmeCorp summarized context block", "s-chat", "2026-01-05", None, 1),
+            ],
+        )
+        cursor = conn.cursor()
+        nodes = SelectiveMemoryRetriever()._query_hermes_state_db(
+            cursor,
+            "state.db",
+            "messages",
+            {"messages": "messages", "sessions": "sessions"},
+            ["AcmeCorp"],
+        )
+
+    facts = [node.fact for node in nodes]
+    assert any("interactive chat discussion" in fact for fact in facts)
+    assert not any("kanban card move" in fact for fact in facts)
+    assert not any("subagent worker" in fact for fact in facts)
+    assert not any("tool execution internal" in fact for fact in facts)
+    assert not any("[CONTEXT COMPACTION]" in fact for fact in facts)
+
+
+def test_resolve_memory_db_password_honors_secret_scope(monkeypatch):
+    import sys
+    import types
+    from neural_context.memory import _resolve_memory_db_password
+
+    # Test secret_scope path
+    fake_secret_scope = types.ModuleType("agent.secret_scope")
+    fake_secret_scope.get_secret = lambda name: "scoped_secret_pwd_42" if name == "FOCUS_MEMORY_DB_PASSWORD" else None
+    agent = types.ModuleType("agent")
+    agent.secret_scope = fake_secret_scope
+    monkeypatch.setitem(sys.modules, "agent", agent)
+    monkeypatch.setitem(sys.modules, "agent.secret_scope", fake_secret_scope)
+
+    assert _resolve_memory_db_password() == "scoped_secret_pwd_42"
+
+    # Test env fallback when secret_scope is unavailable
+    monkeypatch.delitem(sys.modules, "agent.secret_scope", raising=False)
+    monkeypatch.delitem(sys.modules, "agent", raising=False)
+    monkeypatch.setenv("FOCUS_MEMORY_DB_PASSWORD", "env_secret_pwd_99")
+    assert _resolve_memory_db_password() == "env_secret_pwd_99"
+
+
+def test_plugin_config_loads_memory_settings_from_ctx():
+    from neural_context.config import PluginConfig
+
+    class MockCtx:
+        def get_config(self, key, default=None):
+            if key == "memory_db_uri":
+                return "postgresql://user@remote-host:5432/memorydb"
+            if key == "extra_memory_dirs":
+                return ["/data/extra1", "/data/extra2"]
+            return default
+
+    cfg = PluginConfig.load_from_ctx(MockCtx())
+    assert cfg.memory_db_uri == "postgresql://user@remote-host:5432/memorydb"
+    assert cfg.extra_memory_dirs == ["/data/extra1", "/data/extra2"]

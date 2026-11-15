@@ -144,10 +144,14 @@ def handle_cli(
             ]
             if not skill_files:
                 try:
-                    from agent import skill_utils
-                    roots = [Path(root).resolve() for _tier, root in skill_utils.get_skill_search_roots(
-                        include_project=config.software_inspection_enabled
-                    )]
+                    from tools.skills_tool import skill_search_dirs
+
+                    roots_tuples, _active_dir = skill_search_dirs()
+                    roots = [
+                        Path(root).resolve()
+                        for tier, root in roots_tuples
+                        if config.software_inspection_enabled or tier != 0
+                    ]
                     if not any(scan_dir.is_relative_to(root) for root in roots):
                         print("[ERROR] Path is not part of the active trusted Hermes skill inventory.")
                         return 1

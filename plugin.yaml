@@ -9,7 +9,7 @@ description: >-
 author: Jesús Díaz & NeuralCrew Labs
 license: MIT
 homepage: https://github.com/Kattegat-crew/hermes_focus_plugin
-requires_hermes: ">=0.21.6"
+requires_hermes: ">=0.22.6"
 kind: standalone
 tags:
   - focus
@@ -26,6 +26,10 @@ provides_hooks:
   - pre_llm_call
   - post_llm_call
 requires_env: []
+optional_env:
+  - name: FOCUS_MEMORY_DB_PASSWORD
+    description: "Optional password for the external memory database URI"
+    password: true
 config_schema:
   enabled:
     type: bool
@@ -48,6 +52,14 @@ config_schema:
     type: int
     default: 0
     description: "Memory context budget in estimated tokens: 0 imposes no plugin budget, or use a positive integer ceiling."
+  memory_db_uri:
+    type: str
+    default: ""
+    description: "Optional database URI or file path for external memory store (e.g. postgresql://user@host/db or sqlite:///path)."
+  extra_memory_dirs:
+    type: list
+    default: []
+    description: "Optional list of additional directories containing memory notes or SQLite databases to ingest."
   software_inspection_enabled:
     type: bool
     default: true

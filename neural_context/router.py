@@ -5,7 +5,7 @@ import time
 from html import escape
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from .config import PluginConfig
 from .i18n import (
@@ -345,7 +345,11 @@ class ContextCoordinator:
         self.config = config
         self.sidecar = sidecar
         self.ctx = ctx
-        self.memory_retriever = SelectiveMemoryRetriever(token_budget=config.memory_token_budget)
+        self.memory_retriever = SelectiveMemoryRetriever(
+            token_budget=config.memory_token_budget,
+            memory_db_uri=config.memory_db_uri,
+            extra_memory_dirs=config.extra_memory_dirs,
+        )
 
         if config.router_backend == "graph":
             self.router: SkillRouterBackend = GraphRouter()
@@ -360,6 +364,8 @@ class ContextCoordinator:
         user_message: str,
         cwd: Optional[str] = None,
         session_id: Optional[str] = None,
+        memory_db_uri: Optional[str] = None,
+        extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
     ) -> RouteResult:
         start_time = time.perf_counter()
 
@@ -393,6 +399,8 @@ class ContextCoordinator:
                 probe=analysis.memory_probe,
                 cwd=cwd,
                 session_id=session_id,
+                memory_db_uri=memory_db_uri or self.config.memory_db_uri,
+                extra_memory_dirs=extra_memory_dirs if extra_memory_dirs is not None else self.config.extra_memory_dirs,
             )
             if memories:
                 memory_hints = " ".join([f"{m.entity}: {m.fact}" if m.entity else m.fact for m in memories])

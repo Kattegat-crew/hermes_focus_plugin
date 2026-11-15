@@ -148,34 +148,29 @@ def test_discovery_uses_native_trusted_project_iterator_and_tiers(tmp_path, monk
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"---\nname: {path.parent.name}\n---\n")
 
-    fake = types.ModuleType("agent.skill_utils")
-    fake.TIER_PROJECT, fake.TIER_LOCAL, fake.TIER_CREATE_DIR, fake.TIER_EXTERNAL = range(4)
-    fake.get_skill_search_roots = lambda include_project=True: (
-        ([(0, project_root)] if include_project else []) + [(1, profile_root)]
-    )
-    fake.iter_skill_index_files = lambda root, _name: [profile, disabled, unavailable] if root == profile_root else [unsafe, trusted]
-    fake.iter_project_skill_files = lambda _root: [trusted]
-    fake.parse_frontmatter = lambda content: ({"name": content.split("name: ", 1)[1].splitlines()[0]}, "")
-    fake.resolve_skill_catalog = lambda entries: [
-        dict(entry, status="unique", load_name=("a/one" if entry["name"] == "disabled" else entry["name"]))
-        for entry in entries
-    ]
-    fake.get_disabled_skill_names = lambda: {"a/one"}
-    fake.is_disabled_entry = lambda entry, disabled: (entry.get("load_name") or entry["name"]) in disabled
-    fake.skill_matches_platform = lambda frontmatter: frontmatter["name"] != "unavailable"
-    fake.skill_matches_environment = lambda _frontmatter: True
-    fake.skill_matches_apps = lambda _frontmatter: True
-    agent = types.ModuleType("agent")
-    agent.skill_utils = fake
-    monkeypatch.setitem(sys.modules, "agent", agent)
-    monkeypatch.setitem(sys.modules, "agent.skill_utils", fake)
+    fake = types.ModuleType("tools.skills_tool")
+    fake.skill_search_dirs = lambda: ([(0, project_root), (1, profile_root)], profile_root)
+    fake.find_all_skills = lambda: [{"name": "trusted"}, {"name": "profile-skill"}]
+
+    def _locate(name, cat, roots):
+        if name == "trusted" and any(r == project_root for _, r in roots):
+            return None, trusted.parent, trusted
+        if name == "profile-skill" and any(r == profile_root for _, r in roots):
+            return None, profile.parent, profile
+        return "not found", None, None
+
+    fake.locate_skill = _locate
+    tools = types.ModuleType("tools")
+    tools.skills_tool = fake
+    monkeypatch.setitem(sys.modules, "tools", tools)
+    monkeypatch.setitem(sys.modules, "tools.skills_tool", fake)
 
     paths, project_paths, sources, names, tiers = sidecar.discover_skill_inventory()
     assert paths == [trusted, profile]
     assert project_paths == [trusted]
     assert sources[trusted] == (0, project_root)
     assert names[trusted] == "trusted"
-    assert tiers == {0, 1, 2, 3}
+    assert tiers == {0, 1}
 
     paths_without_project, project_paths, *_ = sidecar.discover_skill_inventory(include_project=False)
     assert paths_without_project == [profile]

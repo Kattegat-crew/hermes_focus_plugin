@@ -8,7 +8,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from .config import get_hermes_home
 from .models import MemoryItem, MemoryProbe
@@ -342,6 +342,20 @@ def _escape_sql_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _resolve_memory_db_password() -> Optional[str]:
+    """Resolve external memory database password honoring Hermes profile secret scope."""
+    try:
+        from agent.secret_scope import get_secret
+
+        val = get_secret("FOCUS_MEMORY_DB_PASSWORD")
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    except Exception:
+        pass
+    val = os.environ.get("FOCUS_MEMORY_DB_PASSWORD", "").strip()
+    return val if val else None
+
+
 class SelectiveMemoryRetriever:
     """
     Hexagonal Bipartite Concept-Entity-Fact Graph Memory Retriever.
@@ -353,8 +367,17 @@ class SelectiveMemoryRetriever:
       (IDF + morphological density + spreading activation) so only relevant historical facts are injected.
     """
 
-    def __init__(self, token_budget: int = 0):
+    def __init__(
+        self,
+        token_budget: int = 0,
+        memory_db_uri: str = "",
+        extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
+    ):
         self.token_budget = token_budget  # 0 = unlimited by default, preserves full context
+        self.memory_db_uri = memory_db_uri
+        self.extra_memory_dirs = [
+            Path(p) for p in (extra_memory_dirs or []) if str(p).strip()
+        ]
 
     def retrieve(
         self,
@@ -362,6 +385,8 @@ class SelectiveMemoryRetriever:
         probe: Optional[MemoryProbe] = None,
         cwd: Optional[str] = None,
         session_id: Optional[str] = None,
+        memory_db_uri: Optional[str] = None,
+        extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
     ) -> List[MemoryItem]:
         clean_entities = [e.strip() for e in (entities or []) if len(e.strip()) >= 2]
         if probe and probe.entity and probe.entity.strip() not in clean_entities:
@@ -475,28 +500,62 @@ class SelectiveMemoryRetriever:
                             if len(candidate_files) >= 50:
                                 break
 
-        # Tier 3: Custom Environment Memory Databases, URIs, or Archive Directories
-        for env_var in ("HERMES_MEMORY_DB", "FOCUS_MEMORY_DB", "HERMES_MEMORY_DIR", "HERMES_MEMORY_PATH"):
-            custom_val = os.environ.get(env_var, "").strip()
-            if not custom_val:
-                continue
-            if "://" in custom_val:
-                if custom_val not in external_db_uris:
-                    external_db_uris.append(custom_val)
-                continue
-            cmd_p = Path(custom_val)
-            if cmd_p.is_file() and is_safe_memory_file(cmd_p):
-                if cmd_p.suffix.lower() in (".db", ".sqlite", ".sqlite3"):
-                    if cmd_p not in sqlite_candidates:
-                        sqlite_candidates.append(cmd_p)
-                elif cmd_p.suffix.lower() == ".md" and cmd_p not in candidate_files:
-                    candidate_files.append(cmd_p)
-            elif cmd_p.is_dir():
-                for dbp in cmd_p.glob("**/*.db"):
-                    if "sidecar" not in dbp.name.lower() and dbp.is_file() and is_safe_memory_file(dbp):
+        # Tier 3: Configured Memory Database URI and Extra Memory Directories
+        # (Read from plugin settings via ctx.get_config, never from bare os.environ)
+        effective_db_uri = str(memory_db_uri if memory_db_uri is not None else self.memory_db_uri or "").strip()
+        if effective_db_uri:
+            if "://" in effective_db_uri:
+                if effective_db_uri not in external_db_uris:
+                    external_db_uris.append(effective_db_uri)
+            else:
+                cmd_p = Path(effective_db_uri)
+                if cmd_p.is_file() and is_safe_memory_file(cmd_p):
+                    if cmd_p.suffix.lower() in (".db", ".sqlite", ".sqlite3"):
+                        if cmd_p not in sqlite_candidates:
+                            sqlite_candidates.append(cmd_p)
+                    elif cmd_p.suffix.lower() == ".md" and cmd_p not in candidate_files:
+                        candidate_files.append(cmd_p)
+                elif cmd_p.is_dir():
+                    for dbp in cmd_p.glob("**/*.db"):
+                        if (
+                            "sidecar" not in dbp.name.lower()
+                            and "receipt" not in dbp.name.lower()
+                            and dbp.is_file()
+                            and is_safe_memory_file(dbp)
+                        ):
+                            if dbp not in sqlite_candidates:
+                                sqlite_candidates.append(dbp)
+                    for fp in cmd_p.glob("**/*.md"):
+                        if fp.name.upper() in ("USER.MD", "SOUL.MD", "AGENTS.MD"):
+                            continue
+                        if fp.is_file() and is_safe_memory_file(fp) and fp not in candidate_files:
+                            candidate_files.append(fp)
+                            if len(candidate_files) >= 50:
+                                break
+
+        effective_extra_dirs = (
+            [Path(p) for p in extra_memory_dirs if str(p).strip()]
+            if extra_memory_dirs is not None
+            else self.extra_memory_dirs
+        )
+        for custom_p in effective_extra_dirs:
+            if custom_p.is_file() and is_safe_memory_file(custom_p):
+                if custom_p.suffix.lower() in (".db", ".sqlite", ".sqlite3"):
+                    if custom_p not in sqlite_candidates:
+                        sqlite_candidates.append(custom_p)
+                elif custom_p.suffix.lower() == ".md" and custom_p not in candidate_files:
+                    candidate_files.append(custom_p)
+            elif custom_p.is_dir():
+                for dbp in custom_p.glob("**/*.db"):
+                    if (
+                        "sidecar" not in dbp.name.lower()
+                        and "receipt" not in dbp.name.lower()
+                        and dbp.is_file()
+                        and is_safe_memory_file(dbp)
+                    ):
                         if dbp not in sqlite_candidates:
                             sqlite_candidates.append(dbp)
-                for fp in cmd_p.glob("**/*.md"):
+                for fp in custom_p.glob("**/*.md"):
                     if fp.name.upper() in ("USER.MD", "SOUL.MD", "AGENTS.MD"):
                         continue
                     if fp.is_file() and is_safe_memory_file(fp) and fp not in candidate_files:
@@ -1016,7 +1075,12 @@ class SelectiveMemoryRetriever:
         has_ts = "timestamp" in msg_cols
         has_deleted_at = "deleted_at" in msg_cols
 
-        where_clauses = ["m.content IS NOT NULL", "length(m.content) >= 10"]
+        where_clauses = [
+            "m.content IS NOT NULL",
+            "length(m.content) >= 10",
+            "m.content NOT LIKE '[CONTEXT COMPACTION%'",
+            "m.content NOT LIKE '[CONTEXT SUMMARY]:%'",
+        ]
         base_params: List[Any] = []
         if has_role:
             where_clauses.append("m.role IN ('user', 'assistant')")
@@ -1027,6 +1091,15 @@ class SelectiveMemoryRetriever:
         if has_session_id and active_session_id:
             where_clauses.append("m.session_id != ?")
             base_params.append(active_session_id)
+
+        if has_sessions and has_session_id:
+            try:
+                cursor.execute(f'PRAGMA table_info("{table_set_lower["sessions"]}")')
+                sess_cols = {str(r[1]).lower() for r in cursor.fetchall()}
+                if "source" in sess_cols:
+                    where_clauses.append("(s.source IS NULL OR s.source NOT IN ('kanban', 'subagent', 'tool'))")
+            except Exception:
+                pass
 
         title_expr = "s.title" if (has_sessions and has_session_id) else "NULL"
         ts_expr = "m.timestamp" if has_ts else "NULL"
@@ -1305,7 +1378,19 @@ class SelectiveMemoryRetriever:
 
         engine = None
         try:
-            engine = create_engine(db_uri, pool_pre_ping=True)
+            engine_target: Any = db_uri
+            db_pwd = _resolve_memory_db_password()
+            if db_pwd:
+                try:
+                    from sqlalchemy.engine import make_url
+
+                    parsed_url = make_url(db_uri)
+                    if not parsed_url.password:
+                        engine_target = parsed_url.set(password=db_pwd)
+                except Exception:
+                    pass
+
+            engine = create_engine(engine_target, pool_pre_ping=True)
             inspector = inspect(engine)
             identifier_preparer = engine.dialect.identifier_preparer
 

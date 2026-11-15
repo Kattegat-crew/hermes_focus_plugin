@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -48,6 +48,8 @@ class PluginConfig(BaseModel):
     max_context_tokens: int = 0  # 0 = unlimited by default, preserves full procedural depth
     selective_memory_enabled: bool = True
     memory_token_budget: int = 0  # 0 = unlimited by default, preserves all relevant facts
+    memory_db_uri: str = ""
+    extra_memory_dirs: List[str] = Field(default_factory=list)
     software_inspection_enabled: bool = True
     sidecar_db_path: str = ""
     receipts_path: str = ""
@@ -62,8 +64,9 @@ class PluginConfig(BaseModel):
         if ctx is not None and hasattr(ctx, "get_config"):
             fields = [
                 "enabled", "pre_hook_enabled", "router_backend", "max_context_tokens",
-                "selective_memory_enabled", "memory_token_budget", "software_inspection_enabled",
-                "sidecar_db_path", "receipts_path", "timeout_ms",
+                "selective_memory_enabled", "memory_token_budget",
+                "memory_db_uri", "extra_memory_dirs",
+                "software_inspection_enabled", "sidecar_db_path", "receipts_path", "timeout_ms",
             ]
             for f in fields:
                 default_val = getattr(default_inst, f)
@@ -75,6 +78,19 @@ class PluginConfig(BaseModel):
                         config_data[f] = default_val
                 except Exception:
                     config_data[f] = default_val
+
+        # Normalize extra_memory_dirs
+        raw_extra_dirs = config_data.get("extra_memory_dirs")
+        if isinstance(raw_extra_dirs, str):
+            config_data["extra_memory_dirs"] = [
+                d.strip() for d in raw_extra_dirs.split(",") if d.strip()
+            ]
+        elif isinstance(raw_extra_dirs, (list, tuple)):
+            config_data["extra_memory_dirs"] = [
+                str(d).strip() for d in raw_extra_dirs if str(d).strip()
+            ]
+        elif raw_extra_dirs is None:
+            config_data["extra_memory_dirs"] = []
 
         data_dir = get_plugin_data_dir()
 

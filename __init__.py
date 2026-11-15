@@ -150,11 +150,19 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
 
     try:
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
+        turn_config = PluginConfig.load_from_ctx(ctx) if ctx is not None else config
         cwd = kwargs.get("cwd") or _ctx_cwd(ctx)
         analysis = triage.analyze(
-            text, cwd=cwd, software_inspection_enabled=config.software_inspection_enabled
+            text, cwd=cwd, software_inspection_enabled=turn_config.software_inspection_enabled
         )
-        result = coordinator.execute(analysis, user_message=text, cwd=cwd, session_id=session_id or None)
+        result = coordinator.execute(
+            analysis,
+            user_message=text,
+            cwd=cwd,
+            session_id=session_id or None,
+            memory_db_uri=turn_config.memory_db_uri,
+            extra_memory_dirs=turn_config.extra_memory_dirs,
+        )
 
         # Store session/turn state isolated from concurrent sessions (bounded to 256 entries)
         if len(_session_turns) >= 256:
