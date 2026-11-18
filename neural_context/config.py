@@ -29,9 +29,18 @@ def get_plugin_data_dir() -> Path:
 
 
 def get_hermes_language() -> str:
-    """Resolve the active Hermes language setting (HERMES_LANGUAGE or display.language)."""
-    env_lang = os.environ.get("HERMES_LANGUAGE")
-    if env_lang:
+    """Resolve the active Hermes language setting (secret_scope HERMES_LANGUAGE or display.language)."""
+    env_lang: Optional[str] = None
+    try:
+        from agent.secret_scope import UnscopedSecretError, get_secret
+
+        try:
+            env_lang = get_secret("HERMES_LANGUAGE")
+        except UnscopedSecretError:
+            env_lang = os.environ.get("HERMES_LANGUAGE")
+    except ImportError:
+        env_lang = os.environ.get("HERMES_LANGUAGE")
+    if env_lang and env_lang.strip():
         return env_lang.strip()
     try:
         from hermes_cli.config import load_config_readonly
@@ -50,7 +59,12 @@ class PluginConfig(BaseModel):
     memory_token_budget: int = 0  # 0 = unlimited by default, preserves all relevant facts
     memory_db_uri: str = ""
     extra_memory_dirs: List[str] = Field(default_factory=list)
-    excluded_session_sources: List[str] = Field(default_factory=list)
+    excluded_session_sources: List[str] = Field(
+        default_factory=lambda: ["kanban", "subagent", "tool"]
+    )
+    excluded_message_prefixes: List[str] = Field(
+        default_factory=lambda: ["[CONTEXT COMPACTION", "[CONTEXT SUMMARY]:"]
+    )
     software_inspection_enabled: bool = True
     project_scan_paths: List[str] = Field(default_factory=list)
     sidecar_db_path: str = ""
@@ -67,7 +81,7 @@ class PluginConfig(BaseModel):
             fields = [
                 "enabled", "pre_hook_enabled", "router_backend", "max_context_tokens",
                 "selective_memory_enabled", "memory_token_budget",
-                "memory_db_uri", "extra_memory_dirs", "excluded_session_sources",
+                "memory_db_uri", "extra_memory_dirs", "excluded_session_sources", "excluded_message_prefixes",
                 "software_inspection_enabled", "project_scan_paths", "sidecar_db_path", "receipts_path", "timeout_ms",
             ]
             for f in fields:
@@ -105,7 +119,20 @@ class PluginConfig(BaseModel):
                 str(s).strip().lower() for s in raw_sources if str(s).strip()
             ]
         elif raw_sources is None:
-            config_data["excluded_session_sources"] = []
+            config_data["excluded_session_sources"] = list(default_inst.excluded_session_sources)
+
+        # Normalize excluded_message_prefixes (preserve case for prefix matching)
+        raw_prefixes = config_data.get("excluded_message_prefixes")
+        if isinstance(raw_prefixes, str):
+            config_data["excluded_message_prefixes"] = [
+                p.strip() for p in raw_prefixes.split(",") if p.strip()
+            ]
+        elif isinstance(raw_prefixes, (list, tuple, set)):
+            config_data["excluded_message_prefixes"] = [
+                str(p).strip() for p in raw_prefixes if str(p).strip()
+            ]
+        elif raw_prefixes is None:
+            config_data["excluded_message_prefixes"] = list(default_inst.excluded_message_prefixes)
 
         # Normalize project_scan_paths
         raw_scan_paths = config_data.get("project_scan_paths")

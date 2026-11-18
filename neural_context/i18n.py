@@ -240,9 +240,9 @@ def resolve_language(explicit: Any = None) -> str:
     for candidate in candidates:
         if not candidate:
             continue
-        if isinstance(candidate, str) and "," in candidate:
-            # LANGUAGE puede venir como lista "es:en"
-            for part in candidate.split(":"):
+        if isinstance(candidate, str) and ("," in candidate or ":" in candidate):
+            # LANGUAGE puede venir como lista "es:en" o "es,en"
+            for part in candidate.replace(",", ":").split(":"):
                 code = normalize_language(part)
                 if code:
                     return code

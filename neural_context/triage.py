@@ -82,16 +82,99 @@ OUTPUT SPECIFICATION (Pure JSON only):
 """
 
 
+def _normalize_turn_content(content: Any) -> str:
+    """Safely extract text from omnichannel/multimodal turn content, dropping binary blobs."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        stripped = content.strip()
+        return "" if stripped.startswith("data:") else stripped
+    if isinstance(content, (list, tuple)):
+        parts = [_normalize_turn_content(item) for item in content]
+        return " ".join(p for p in parts if p).strip()
+    if isinstance(content, dict):
+        for key in ("text", "input_text", "caption"):
+            val = content.get(key)
+            if isinstance(val, str):
+                stripped = val.strip()
+                if stripped and not stripped.startswith("data:"):
+                    return stripped
+        for container_key in ("content", "parts"):
+            if container_key in content and content[container_key] is not None:
+                nested = _normalize_turn_content(content[container_key])
+                if nested:
+                    return nested
+        return ""
+    return str(content).strip()
+
+
+def _scan_balanced_json(text: str) -> tuple[Optional[Dict[str, Any]], bool]:
+    """
+    Scan text for the first valid top-level JSON object using balanced brace/quote tracking.
+    Returns (parsed_dict, has_unclosed_brace).
+    """
+    has_unclosed = False
+    idx = text.find("{")
+    while idx != -1:
+        depth = 0
+        in_quote = False
+        escape = False
+        parsed_here: Optional[Dict[str, Any]] = None
+
+        for pos in range(idx, len(text)):
+            ch = text[pos]
+            if in_quote:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_quote = False
+                continue
+
+            if ch == '"':
+                in_quote = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[idx : pos + 1]
+                    try:
+                        loaded = json.loads(candidate)
+                        if isinstance(loaded, dict):
+                            parsed_here = loaded
+                            return parsed_here, False
+                    except Exception:
+                        pass
+                    break
+
+        if depth > 0 or in_quote:
+            has_unclosed = True
+        idx = text.find("{", idx + 1)
+
+    return None, has_unclosed
+
+
+def _extract_balanced_json(text: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Extract the first valid balanced JSON object from raw model output."""
+    if not text:
+        return None
+    obj, _ = _scan_balanced_json(text)
+    return obj
+
+
 def _is_truncated_completion(text: Optional[str]) -> bool:
-    """Returns True if model completion was truncated (empty string or unclosed JSON)."""
+    """Returns True if model completion was truncated (empty string or unclosed/nested JSON)."""
     if text is None:
         return False
     stripped = text.strip()
     if not stripped:
         return True
-    if "{" in stripped and "}" not in stripped:
-        return True
-    return False
+    obj, has_unclosed = _scan_balanced_json(stripped)
+    if obj is not None:
+        return False
+    return has_unclosed
 
 
 class CognitiveTriage:
@@ -119,6 +202,7 @@ class CognitiveTriage:
         cwd: Optional[str] = None,
         software_inspection_enabled: bool = True,
         project_scan_paths: Optional[List[Union[str, Path]]] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> TriageAnalysis:
         clean_text = user_message.strip()
         domain_info = inspect_workspace_governance(
@@ -127,9 +211,24 @@ class CognitiveTriage:
             project_scan_paths=project_scan_paths,
         )
 
+        history_lines: List[str] = []
+        if conversation_history:
+            recent = list(conversation_history)[-6:]
+            for idx, turn in enumerate(recent):
+                if not isinstance(turn, dict):
+                    continue
+                role = str(turn.get("role") or "user").strip().lower()
+                turn_text = _normalize_turn_content(turn.get("content"))
+                if not turn_text:
+                    continue
+                if idx == len(recent) - 1 and role == "user" and turn_text == clean_text:
+                    continue
+                history_lines.append(f"{role}: {turn_text[:300]}")
+        history_context = "\n".join(history_lines)
+
         # 1. Execute cognitive interpretation via model
         model_started = time.perf_counter()
-        llm_output, is_truncated, model_error = self._call_model(clean_text)
+        llm_output, is_truncated, model_error = self._call_model(clean_text, history_context=history_context)
         model_elapsed_ms = (time.perf_counter() - model_started) * 1000
 
         # 2. Parse and validate structured output
@@ -157,11 +256,12 @@ class CognitiveTriage:
 
         return analysis
 
-    def _call_model(self, user_text: str) -> tuple[Optional[str], bool, Optional[str]]:
+    def _call_model(self, user_text: str, history_context: str = "") -> tuple[Optional[str], bool, Optional[str]]:
         """Invokes the model facade (ctx.llm, custom model_fn, or structured prompt) with adaptive deadline & tokens."""
         hermes_locale = get_hermes_language()
         locale_directive = f"\n[Hermes Configured Locale: {hermes_locale}]\n" if hermes_locale else ""
-        prompt = f"{TRIAGE_SYSTEM_PROMPT}{locale_directive}\n\nUSER MESSAGE:\n\"{user_text}\"\n\nJSON RESPONSE:"
+        history_block = f"\nRECENT CONVERSATION:\n{history_context}\n" if history_context else ""
+        prompt = f"{TRIAGE_SYSTEM_PROMPT}{locale_directive}{history_block}\n\nUSER MESSAGE:\n\"{user_text}\"\n\nJSON RESPONSE:"
         timeout_s: Optional[float] = (self.timeout_ms / 1000.0) if (self.timeout_ms and self.timeout_ms > 0) else None
 
         # Compute dynamic token budget based on input complexity (preserves exact base for short prompts)
@@ -205,16 +305,19 @@ class CognitiveTriage:
                 resp = self.ctx.llm.complete(**complete_kwargs)
                 text = resp.text if hasattr(resp, "text") and isinstance(resp.text, str) else (resp if isinstance(resp, str) else None)
 
-                # Check for truncation (finish_reason=length with empty content or cut-off JSON)
-                if _is_truncated_completion(text) and effective_max_tokens > 0:
-                    # Adaptive retry with expanded budget without tight artificial cuts
+                # Retry once on truncation even when max_tokens == 0 (unconstrained budget)
+                if _is_truncated_completion(text):
                     try:
-                        retry_budget = effective_max_tokens * 2
+                        retry_prompt = (
+                            f"{prompt}\n[IMPORTANT: Previous output was truncated. "
+                            "Return ONLY compact, single-line valid JSON without reasoning prose or fences.]"
+                        )
                         retry_kwargs: Dict[str, Any] = {
-                            "messages": [{"role": "user", "content": prompt}],
+                            "messages": [{"role": "user", "content": retry_prompt}],
                             "temperature": 0.0,
                         }
-                        retry_kwargs["max_tokens"] = retry_budget
+                        if effective_max_tokens > 0:
+                            retry_kwargs["max_tokens"] = effective_max_tokens * 2
                         if effective_timeout_s is not None:
                             elapsed = time.perf_counter() - t0
                             remaining_s = effective_timeout_s - elapsed
@@ -249,10 +352,9 @@ class CognitiveTriage:
         intent induction rather than hardcoded word matching.
         """
         if raw_output:
-            match = re.search(r"\{[\s\S]*\}", raw_output)
-            if match:
+            data = _extract_balanced_json(raw_output)
+            if isinstance(data, dict):
                 try:
-                    data = json.loads(match.group(0))
 
                     # Parse route or derive from legacy boolean signals
                     raw_route = str(data.get("route", "")).strip().upper()

@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Validation](https://img.shields.io/badge/hermes%20plugins%20validate-15%2F15%20passing-brightgreen.svg)]()
 [![Doctor](https://img.shields.io/badge/hermes%20plugins%20doctor-healthy-brightgreen.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-60%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-125%20passed-brightgreen.svg)]()
 
 > **Cognitive context engine for Hermes Agent**: intercepts turns prior to inference, classifies user intent into four cognitive routing quadrants, grounds skill discovery in universal memory facts, and injects winning procedural guidance in a single step with zero KV-cache mutation.
 
@@ -136,13 +136,24 @@ plugins:
     focus:
       enabled: true
       settings:
+        enabled: true
+        pre_hook_enabled: true
         router_backend: "graph"         # "graph" (default, bipartite Personalized PageRank) | "host_llm"
         max_context_tokens: 0           # No plugin ceiling; host/provider limits still apply
         memory_token_budget: 0          # No plugin memory ceiling
         selective_memory_enabled: true  # Surgical memory probing based on extracted entities
+        memory_db_uri: ""               # Optional SQLite path or PostgreSQL URI
+        extra_memory_dirs: []           # Additional memory note or SQLite directories
+        excluded_session_sources: ["kanban", "subagent", "tool"]  # Automated sources excluded from state.db recall
+        excluded_message_prefixes: ["[CONTEXT COMPACTION", "[CONTEXT SUMMARY]:"]
         software_inspection_enabled: true
-        timeout_ms: 0               # 0 leaves timeout control to host/provider
+        project_scan_paths: []          # Root workspace paths for multi-project entity resolution
+        sidecar_db_path: ""             # Empty uses canonical plugin-data directory
+        receipts_path: ""               # Empty uses canonical plugin-data directory
+        timeout_ms: 0                   # 0 leaves timeout control to host/provider
 ```
+
+> **External PostgreSQL Databases**: Configuring `memory_db_uri` with PostgreSQL (e.g., `postgresql://user@host/db`) requires `SQLAlchemy` and a compatible Postgres driver (such as `psycopg` or `psycopg2`) installed in your Hermes Python environment. Supply the password via `FOCUS_MEMORY_DB_PASSWORD` in Hermes's profile secret store (`secret_scope`), never in plain-text config or cross-profile env fallbacks.
 
 ### Localized injected context
 
@@ -167,7 +178,7 @@ Unknown or unsupported locales fall back to English instead of breaking the bloc
 ## Verification & Tests
 
 ```bash
-# Run pytest test suite (60 passing tests)
+# Run pytest test suite (125 passing tests, 1 skipped without sqlalchemy)
 pytest -v
 
 # Run official Hermes Plugin validation (15/15 checks passed)

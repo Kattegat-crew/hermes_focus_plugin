@@ -132,17 +132,21 @@ def inspect_workspace_governance(
     governance_root: Optional[str] = None
     stack: List[str] = []
 
-    # Ascend to find the sovereign governance boundary
+    # Ascend to find the sovereign governance boundary (bounded walk across safe directories)
     try:
-        while current != current.parent:
+        steps = 0
+        while current != current.parent and steps < 25:
+            if not is_safe_workspace_dir(current):
+                break
             has_agents = (current / "AGENTS.md").is_file() or (current / "CLAUDE.md").is_file()
             has_skills = (current / ".skills").is_dir() or (current / ".agents" / "skills").is_dir()
-            has_git = (current / ".git").is_dir()
+            has_git = (current / ".git").exists()
 
             if has_agents or has_skills or has_git:
                 governance_root = str(current)
                 break
             current = current.parent
+            steps += 1
     except Exception:
         governance_root = None
 

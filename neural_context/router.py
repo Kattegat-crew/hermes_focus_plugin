@@ -79,9 +79,10 @@ class GraphRouter(SkillRouterBackend):
     100% free, local, deterministic, and executes in sub-millisecond CPU time.
     """
 
-    def __init__(self, damping: float = 0.85, max_iter: int = 3):
+    def __init__(self, damping: float = 0.85, max_iter: int = 3, sidecar: Any = None):
         self.damping = damping
         self.max_iter = max_iter
+        self.sidecar = sidecar
 
     def route(
         self,
@@ -109,6 +110,7 @@ class GraphRouter(SkillRouterBackend):
         concept_skills: Dict[str, List[str]] = {}
 
         for c, _ in candidates:
+            name_tokens = set(tokenize(c.name))
             tokens = tokenize(f"{c.name} {c.description} {c.lead_paragraph}")
             total = len(tokens) or 1
             freqs: Dict[str, int] = {}
@@ -117,14 +119,21 @@ class GraphRouter(SkillRouterBackend):
 
             for t, count in freqs.items():
                 w = count / total
+                if t in name_tokens:
+                    w *= 1.5
                 skill_edges[c.name][t] = w
                 if t not in concept_skills:
                     concept_skills[t] = []
                 concept_skills[t].append(c.name)
 
         def _concept_specificity(tok: str) -> float:
-            df = len(concept_skills.get(tok, ()))
-            return term_information_weight(tok, df, n_cands)
+            local_df = len(concept_skills.get(tok, ()))
+            corpus_n = int(getattr(self.sidecar, "n_docs", 0) or 0)
+            if self.sidecar is not None and corpus_n >= 4:
+                corpus_df_map = getattr(self.sidecar, "df", {}) or {}
+                eff_df = max(local_df, int(corpus_df_map.get(tok, 0) or 0))
+                return term_information_weight(tok, eff_df, max(n_cands, corpus_n))
+            return term_information_weight(tok, local_df, n_cands)
 
         # Build seed activation vector weighted by concept specificity (IDF + morphological density)
         seeds: Dict[str, float] = {}
@@ -242,8 +251,6 @@ class GraphRouter(SkillRouterBackend):
             if uncovered or (h_score >= top_score * 0.80 and bool(cand_concepts)):
                 winners.append(cand)
                 covered_concepts.update(cand_concepts)
-                if len(winners) >= 3:
-                    break
 
         return winners
 
@@ -334,6 +341,7 @@ class HostLLMRouter(SkillRouterBackend):
         except Exception:
             pass
 
+        self.last_backend = "graph"
         return self.fallback.route_all(analysis, candidates, domain_context=domain_context)
 
 
@@ -352,14 +360,19 @@ class ContextCoordinator:
             memory_db_uri=config.memory_db_uri,
             extra_memory_dirs=config.extra_memory_dirs,
             excluded_session_sources=config.excluded_session_sources,
+            excluded_message_prefixes=config.excluded_message_prefixes,
         )
 
         if config.router_backend == "graph":
-            self.router: SkillRouterBackend = GraphRouter()
+            self.router: SkillRouterBackend = GraphRouter(sidecar=sidecar)
         elif config.router_backend in ("host_llm", "auto"):
-            self.router = HostLLMRouter(ctx=ctx, timeout_ms=config.timeout_ms)
+            self.router = HostLLMRouter(
+                ctx=ctx,
+                fallback=GraphRouter(sidecar=sidecar),
+                timeout_ms=config.timeout_ms,
+            )
         else:
-            self.router = GraphRouter()
+            self.router = GraphRouter(sidecar=sidecar)
 
     def execute(
         self,
@@ -370,6 +383,7 @@ class ContextCoordinator:
         memory_db_uri: Optional[str] = None,
         extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
         excluded_session_sources: Optional[List[str]] = None,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ) -> RouteResult:
         start_time = time.perf_counter()
 
@@ -403,9 +417,10 @@ class ContextCoordinator:
                 probe=analysis.memory_probe,
                 cwd=cwd,
                 session_id=session_id,
-                memory_db_uri=memory_db_uri or self.config.memory_db_uri,
+                memory_db_uri=memory_db_uri if memory_db_uri is not None else self.config.memory_db_uri,
                 extra_memory_dirs=extra_memory_dirs if extra_memory_dirs is not None else self.config.extra_memory_dirs,
                 excluded_session_sources=excluded_session_sources if excluded_session_sources is not None else self.config.excluded_session_sources,
+                excluded_message_prefixes=excluded_message_prefixes if excluded_message_prefixes is not None else self.config.excluded_message_prefixes,
             )
             if memories:
                 memory_hints = " ".join([f"{m.entity}: {m.fact}" if m.entity else m.fact for m in memories])
@@ -482,7 +497,7 @@ class ContextCoordinator:
                 if Path(sk.path).is_file():
                     try:
                         raw_skill = Path(sk.path).read_text(encoding="utf-8", errors="ignore")
-                        formatted = self._format_skill_for_injection(sk.name, raw_skill)
+                        formatted = self._format_skill_for_injection(sk.name, raw_skill, skill_path=sk.path)
                         if formatted:
                             skill_contents.append((sk, formatted))
                     except Exception:
@@ -542,16 +557,41 @@ class ContextCoordinator:
             message=msg_val
         )
 
-    def _format_skill_for_injection(self, name: str, raw_content: str) -> str:
+    def _format_skill_for_injection(self, name: str, raw_content: str, skill_path: Optional[Path | str] = None) -> str:
         # Strip YAML frontmatter
         body = raw_content
         if raw_content.startswith("---"):
             parts = raw_content.split("---", 2)
             if len(parts) >= 3:
                 body = parts[2].strip()
+
+        linked_section = ""
+        if skill_path:
+            skill_dir = Path(skill_path).parent
+            body = body.replace("${HERMES_SKILL_DIR}", str(skill_dir))
+            linked_entries: List[str] = []
+            for folder in ("references", "templates", "scripts", "assets"):
+                sub = skill_dir / folder
+                if sub.is_dir():
+                    try:
+                        files = sorted(
+                            p.relative_to(skill_dir).as_posix()
+                            for p in sub.rglob("*")
+                            if p.is_file()
+                        )
+                    except Exception:
+                        files = []
+                    linked_entries.extend(files)
+            if linked_entries:
+                rendered_links = "\n".join(f"- {escape(rel, quote=False)}" for rel in linked_entries[:24])
+                linked_section = f"<linked_files>\n{rendered_links}\n</linked_files>"
+
         # Retrieved instructions are quoted data; markup-looking tags must not
         # be able to close the host context wrapper.
-        return escape(body, quote=False)
+        escaped_body = escape(body, quote=False)
+        if linked_section:
+            return f"{escaped_body}\n\n{linked_section}" if escaped_body else linked_section
+        return escaped_body
 
     def _assemble_context_block(
         self,
@@ -571,12 +611,15 @@ class ContextCoordinator:
         if not items and not memories and not suggested_skill:
             return None
 
+        max_tokens = self.config.max_context_tokens
+
         # Notice fallback when task requires a skill but none was found
         if not items and not memories and suggested_skill:
             notice = missing_skill_notice(lang, escape(str(suggested_skill), quote=False))
-            return f"<neural_context>\n{notice}\n</neural_context>"
-
-        max_tokens = self.config.max_context_tokens
+            notice_block = f"<neural_context>\n{notice}\n</neural_context>"
+            if max_tokens > 0 and estimate_tokens(notice_block) > max_tokens:
+                return None
+            return notice_block
         header = "<neural_context>"
         instruction = instruction_line(lang)
         footer = "</neural_context>"

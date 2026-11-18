@@ -62,8 +62,17 @@ config_schema:
     description: "Optional list of additional directories containing memory notes or SQLite databases to ingest."
   excluded_session_sources:
     type: list
-    default: []
-    description: "Optional list of session sources to exclude from state.db recall (e.g. ['kanban', 'subagent', 'tool']). When empty, defers dynamically to host runtime conventions."
+    default:
+      - kanban
+      - subagent
+      - tool
+    description: "Session sources to exclude from state.db recall (set to [] to include all session sources)."
+  excluded_message_prefixes:
+    type: list
+    default:
+      - "[CONTEXT COMPACTION"
+      - "[CONTEXT SUMMARY]:"
+    description: "Message prefixes (such as compaction summaries) to exclude from database fact recall (set to [] to disable)."
   software_inspection_enabled:
     type: bool
     default: true

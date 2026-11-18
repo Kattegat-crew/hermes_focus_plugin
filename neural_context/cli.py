@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
@@ -34,7 +35,12 @@ CONFIG_FIELD_TYPES = {
     "max_context_tokens": int,
     "selective_memory_enabled": bool,
     "memory_token_budget": int,
+    "memory_db_uri": str,
+    "extra_memory_dirs": list,
+    "excluded_session_sources": list,
+    "excluded_message_prefixes": list,
     "software_inspection_enabled": bool,
+    "project_scan_paths": list,
     "sidecar_db_path": str,
     "receipts_path": str,
     "timeout_ms": int,
@@ -59,6 +65,19 @@ def _coerce_and_validate(key: str, val: str) -> Tuple[Optional[Any], Optional[st
             return int(val), None
         except ValueError:
             return None, f"Invalid value for '{key}': expected integer, got '{val}'"
+    elif expected_type is list:
+        stripped = val.strip()
+        if not stripped:
+            return [], None
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except ValueError as exc:
+                return None, f"Invalid JSON list for '{key}': {exc}"
+            if not isinstance(parsed, list):
+                return None, f"Invalid value for '{key}': expected JSON list, got '{val}'"
+            return [str(item).strip() for item in parsed if str(item).strip()], None
+        return [item.strip() for item in stripped.split(",") if item.strip()], None
     elif expected_type is str:
         if key == "router_backend" and val not in ("host_llm", "graph"):
             return None, f"Invalid backend '{val}': choose from 'host_llm', 'graph'"
@@ -134,14 +153,31 @@ def handle_cli(
         )
         requested = getattr(args, "path", None)
         if requested:
-            scan_dir = Path(requested).expanduser().resolve()
+            scan_dir_lex = Path(os.path.abspath(os.path.expanduser(str(requested))))
+            scan_dir = scan_dir_lex.resolve()
             if not scan_dir.is_dir():
                 print(f"[ERROR] Skill source is not a directory: {scan_dir}")
                 return 1
-            skill_files = [
-                path for path in skill_files
-                if path.is_relative_to(scan_dir) or scan_dir.is_relative_to(path.parent)
-            ]
+
+            def _in_scan_scope(path: Path) -> bool:
+                path_lex = Path(os.path.abspath(str(path)))
+                if (
+                    path_lex.is_relative_to(scan_dir_lex)
+                    or path.is_relative_to(scan_dir)
+                    or scan_dir.is_relative_to(path.parent)
+                ):
+                    return True
+                if path in source_info:
+                    root_lex = Path(os.path.abspath(str(source_info[path][1])))
+                    root_res = root_lex.resolve()
+                    if (
+                        root_lex.is_relative_to(scan_dir_lex)
+                        or root_res.is_relative_to(scan_dir)
+                    ):
+                        return True
+                return False
+
+            skill_files = [path for path in skill_files if _in_scan_scope(path)]
             if not skill_files:
                 try:
                     from tools.skills_tool import skill_search_dirs
@@ -152,7 +188,15 @@ def handle_cli(
                         for tier, root in roots_tuples
                         if config.software_inspection_enabled or tier != 0
                     ]
-                    if not any(scan_dir.is_relative_to(root) for root in roots):
+                    roots_lex = [
+                        Path(os.path.abspath(str(root)))
+                        for tier, root in roots_tuples
+                        if config.software_inspection_enabled or tier != 0
+                    ]
+                    if not (
+                        any(scan_dir.is_relative_to(root) for root in roots)
+                        or any(scan_dir_lex.is_relative_to(root) for root in roots_lex)
+                    ):
                         print("[ERROR] Path is not part of the active trusted Hermes skill inventory.")
                         return 1
                 except Exception:
@@ -224,7 +268,14 @@ def handle_cli(
         print(f"  max_context_tokens          : {config.max_context_tokens} (0 = unlimited / unconstrained)")
         print(f"  memory_token_budget         : {config.memory_token_budget} (0 = unlimited / unconstrained)")
         print(f"  selective_memory_enabled    : {config.selective_memory_enabled} (Recall domain facts)")
-        print(f"  software_inspection_enabled : {config.software_inspection_enabled} (Detect AGENTS.md & local skills)")
+        print(f"  memory_db_uri               : {config.memory_db_uri!r} (External memory database URI)")
+        print(f"  extra_memory_dirs           : {config.extra_memory_dirs} (Additional memory directories)")
+        print(f"  excluded_session_sources    : {config.excluded_session_sources} (Excluded DB session sources)")
+        print(f"  excluded_message_prefixes   : {config.excluded_message_prefixes} (Excluded DB message prefixes)")
+        print(f"  software_inspection_enabled : {config.software_inspection_enabled} (Detect repo governance & local skills)")
+        print(f"  project_scan_paths          : {config.project_scan_paths} (Workspace project scan roots)")
+        print(f"  sidecar_db_path             : {config.sidecar_db_path}")
+        print(f"  receipts_path               : {config.receipts_path}")
         print(f"  timeout_ms                  : {config.timeout_ms} ms (0 means no plugin-imposed timeout)")
         print("\nTo update a parameter:")
         print("  hermes focus config --set max_context_tokens=1500")

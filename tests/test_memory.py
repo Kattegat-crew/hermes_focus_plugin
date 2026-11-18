@@ -289,6 +289,9 @@ def test_hermes_state_db_source_filter_configured_and_dynamic(tmp_path: Path, mo
                 ("s-chat", "Chat Session", "chat"),
                 ("s-auto1", "Automation 1", "automation_alpha"),
                 ("s-auto2", "Automation 2", "automation_beta"),
+                ("s-kanban", "Kanban 1", "kanban"),
+                ("s-sub", "Subagent 1", "subagent"),
+                ("s-tool", "Tool 1", "tool"),
             ],
         )
         # Messages
@@ -298,11 +301,16 @@ def test_hermes_state_db_source_filter_configured_and_dynamic(tmp_path: Path, mo
                 (1, "user", "AcmeCorp regular interactive chat discussion", "s-chat", "2026-01-01", None, 1),
                 (2, "user", "AcmeCorp automated task payload from alpha", "s-auto1", "2026-01-02", None, 1),
                 (3, "user", "AcmeCorp automated worker log from beta", "s-auto2", "2026-01-03", None, 1),
+                (4, "user", "AcmeCorp kanban card automation run", "s-kanban", "2026-01-04", None, 1),
+                (5, "user", "AcmeCorp subagent delegated background output", "s-sub", "2026-01-05", None, 1),
+                (6, "user", "AcmeCorp tool session telemetry event", "s-tool", "2026-01-06", None, 1),
+                (7, "assistant", "[CONTEXT COMPACTION] AcmeCorp compacted summary", "s-chat", "2026-01-07", None, 1),
+                (8, "assistant", "[CONTEXT SUMMARY]: AcmeCorp older session summary", "s-chat", "2026-01-08", None, 1),
             ],
         )
         cursor = conn.cursor()
 
-        # 1. Configured exclusion filter without static hardcoding
+        # 1. Configured exclusion filter
         retriever_configured = SelectiveMemoryRetriever(
             excluded_session_sources=["automation_alpha", "automation_beta"]
         )
@@ -317,27 +325,41 @@ def test_hermes_state_db_source_filter_configured_and_dynamic(tmp_path: Path, mo
         assert any("interactive chat discussion" in fact for fact in facts)
         assert not any("automated task payload" in fact for fact in facts)
         assert not any("automated worker log" in fact for fact in facts)
+        assert not any("compacted summary" in fact for fact in facts)
+        assert not any("older session summary" in fact for fact in facts)
 
-        # 2. Dynamic host delegation via tools.session_search_tool (no hardcoded lists in plugin)
-        fake_tool = types.ModuleType("tools.session_search_tool")
-        fake_tool._HIDDEN_SESSION_SOURCES = ("automation_alpha",)
-        tools_mod = types.ModuleType("tools")
-        tools_mod.session_search_tool = fake_tool
-        monkeypatch.setitem(sys.modules, "tools", tools_mod)
-        monkeypatch.setitem(sys.modules, "tools.session_search_tool", fake_tool)
-
-        retriever_dynamic = SelectiveMemoryRetriever(excluded_session_sources=[])
-        nodes_dynamic = retriever_dynamic._query_hermes_state_db(
+        # 2. Default config_schema-aligned exclusions apply without private core imports
+        assert "tools.session_search_tool" not in sys.modules
+        retriever_default = SelectiveMemoryRetriever()
+        nodes_default = retriever_default._query_hermes_state_db(
             cursor,
             "state.db",
             "messages",
             {"messages": "messages", "sessions": "sessions"},
             ["AcmeCorp"],
         )
-        facts_dynamic = [node.fact for node in nodes_dynamic]
-        assert any("interactive chat discussion" in fact for fact in facts_dynamic)
-        assert not any("automated task payload" in fact for fact in facts_dynamic)
-        assert any("automated worker log from beta" in fact for fact in facts_dynamic)
+        facts_default = [node.fact for node in nodes_default]
+        assert any("interactive chat discussion" in fact for fact in facts_default)
+        assert not any("kanban card automation" in fact for fact in facts_default)
+        assert not any("subagent delegated" in fact for fact in facts_default)
+        assert not any("tool session telemetry" in fact for fact in facts_default)
+        assert not any("compacted summary" in fact for fact in facts_default)
+
+        # 3. Explicit empty lists disable filtering (user override is authoritative)
+        retriever_unfiltered = SelectiveMemoryRetriever(
+            excluded_session_sources=[],
+            excluded_message_prefixes=[],
+        )
+        nodes_unfiltered = retriever_unfiltered._query_hermes_state_db(
+            cursor,
+            "state.db",
+            "messages",
+            {"messages": "messages", "sessions": "sessions"},
+            ["AcmeCorp"],
+        )
+        facts_unfiltered = [node.fact for node in nodes_unfiltered]
+        assert any("kanban card automation" in fact for fact in facts_unfiltered)
+        assert any("compacted summary" in fact for fact in facts_unfiltered)
 
 
 def test_multilingual_facts_retrieval_without_static_word_blacklists(tmp_path: Path):
@@ -376,9 +398,10 @@ def test_multilingual_facts_retrieval_without_static_word_blacklists(tmp_path: P
 def test_resolve_memory_db_password_honors_secret_scope(monkeypatch):
     import sys
     import types
+    import pytest
     from neural_context.memory import _resolve_memory_db_password
 
-    # Test secret_scope path
+    # 1. Active profile secret scope returns scoped secret
     fake_secret_scope = types.ModuleType("agent.secret_scope")
     fake_secret_scope.get_secret = lambda name: "scoped_secret_pwd_42" if name == "FOCUS_MEMORY_DB_PASSWORD" else None
     agent = types.ModuleType("agent")
@@ -388,15 +411,32 @@ def test_resolve_memory_db_password_honors_secret_scope(monkeypatch):
 
     assert _resolve_memory_db_password() == "scoped_secret_pwd_42"
 
-    # Test env fallback when secret_scope is unavailable
+    # 2. When get_secret returns None (e.g. another profile in multiplex gateway), NEVER fall back to os.environ
+    monkeypatch.setenv("FOCUS_MEMORY_DB_PASSWORD", "env_secret_pwd_99")
+    fake_secret_scope.get_secret = lambda name: None
+    assert _resolve_memory_db_password() is None
+
+    # 3. Exceptions from get_secret (e.g. UnscopedSecretError) must propagate, never fall back to os.environ
+    def _boom(_name: str):
+        raise RuntimeError("UnscopedSecretError")
+
+    fake_secret_scope.get_secret = _boom
+    with pytest.raises(RuntimeError, match="UnscopedSecretError"):
+        _resolve_memory_db_password()
+
+    # 4. Standalone environment without agent.secret_scope returns None, never reading os.environ
     monkeypatch.delitem(sys.modules, "agent.secret_scope", raising=False)
     monkeypatch.delitem(sys.modules, "agent", raising=False)
-    monkeypatch.setenv("FOCUS_MEMORY_DB_PASSWORD", "env_secret_pwd_99")
-    assert _resolve_memory_db_password() == "env_secret_pwd_99"
+    assert _resolve_memory_db_password() is None
 
 
 def test_plugin_config_loads_memory_settings_from_ctx():
     from neural_context.config import PluginConfig
+
+    # Defaults align with plugin.yaml config_schema
+    default_cfg = PluginConfig.load_from_ctx(None)
+    assert default_cfg.excluded_session_sources == ["kanban", "subagent", "tool"]
+    assert default_cfg.excluded_message_prefixes == ["[CONTEXT COMPACTION", "[CONTEXT SUMMARY]:"]
 
     class MockCtx:
         def get_config(self, key, default=None):
@@ -406,9 +446,12 @@ def test_plugin_config_loads_memory_settings_from_ctx():
                 return ["/data/extra1", "/data/extra2"]
             if key == "excluded_session_sources":
                 return ["kanban", "subagent", "tool"]
+            if key == "excluded_message_prefixes":
+                return ["[CUSTOM COMPACTION]"]
             return default
 
     cfg = PluginConfig.load_from_ctx(MockCtx())
     assert cfg.memory_db_uri == "postgresql://user@remote-host:5432/memorydb"
     assert cfg.extra_memory_dirs == ["/data/extra1", "/data/extra2"]
     assert cfg.excluded_session_sources == ["kanban", "subagent", "tool"]
+    assert cfg.excluded_message_prefixes == ["[CUSTOM COMPACTION]"]

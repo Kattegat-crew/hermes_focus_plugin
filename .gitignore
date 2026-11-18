@@ -43,6 +43,18 @@ receipts.jsonl
 .atl/
 .codegraph/
 
+# Workspace-only SDD, rules, skills & memory (never ship to GitHub or Nous)
+AGENTS.md
+ARCHITECTURE.md
+PROJECT_MEMORY.md
+CLAUDE.md
+.agents/
+.skills
+.skills/
+.claude/
+.specs/
+odd/
+
 # Runtime and test residue (never ship)
 *.db
 *.db-shm

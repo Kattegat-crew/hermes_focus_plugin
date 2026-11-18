@@ -316,18 +316,32 @@ def discover_skill_inventory(include_project: bool = True):
             err, sdir, smd = locate_skill(load_name, None, roots)
             if err or not smd:
                 continue
-            path = Path(smd).resolve()
-            if not path.is_file() or path in source_info:
+            lex_path = Path(os.path.abspath(str(smd)))
+            resolved_path = lex_path.resolve()
+            if not resolved_path.is_file():
                 continue
 
             matched_tier = 1
-            matched_root = path.parent
+            matched_root = lex_path.parent
+            lexical_hit = False
             for t, r in roots:
-                r_resolved = Path(r).resolve()
-                if path.is_relative_to(r_resolved):
+                r_lex = Path(os.path.abspath(str(r)))
+                if lex_path.is_relative_to(r_lex):
                     matched_tier = t
-                    matched_root = r_resolved
+                    matched_root = r_lex
+                    lexical_hit = True
                     break
+            if not lexical_hit:
+                for t, r in roots:
+                    r_resolved = Path(r).resolve()
+                    if resolved_path.is_relative_to(r_resolved):
+                        matched_tier = t
+                        matched_root = r_resolved
+                        break
+
+            path = lex_path if lexical_hit else resolved_path
+            if path in source_info:
+                continue
 
             paths.append(path)
             names[path] = load_name
@@ -378,7 +392,7 @@ class SidecarIndex:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS skills_sidecar (
-                    skill_name TEXT PRIMARY KEY,
+                    skill_name TEXT NOT NULL,
                     skill_path TEXT NOT NULL,
                     sha256 TEXT NOT NULL,
                     description TEXT,
@@ -387,15 +401,45 @@ class SidecarIndex:
                     indexed_tokens INTEGER,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     source_root TEXT NOT NULL DEFAULT '',
-                    source_tier INTEGER NOT NULL DEFAULT 1
+                    source_tier INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (skill_name, source_tier)
                 )
             """)
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(skills_sidecar)")}
+            col_info = conn.execute("PRAGMA table_info(skills_sidecar)").fetchall()
+            columns = {row[1] for row in col_info}
             if "source_root" not in columns:
                 conn.execute("ALTER TABLE skills_sidecar ADD COLUMN source_root TEXT NOT NULL DEFAULT ''")
             if "source_tier" not in columns:
                 conn.execute("ALTER TABLE skills_sidecar ADD COLUMN source_tier INTEGER NOT NULL DEFAULT 1")
                 conn.execute("UPDATE skills_sidecar SET source_tier = CASE WHEN is_project_local = 1 THEN 0 ELSE 1 END")
+                col_info = conn.execute("PRAGMA table_info(skills_sidecar)").fetchall()
+
+            pk_cols = [row[1] for row in sorted(col_info, key=lambda r: r[5]) if row[5] > 0]
+            if pk_cols != ["skill_name", "source_tier"]:
+                conn.execute("""
+                    CREATE TABLE skills_sidecar_migrated (
+                        skill_name TEXT NOT NULL,
+                        skill_path TEXT NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        description TEXT,
+                        lead_paragraph TEXT,
+                        is_project_local INTEGER DEFAULT 0,
+                        indexed_tokens INTEGER,
+                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        source_root TEXT NOT NULL DEFAULT '',
+                        source_tier INTEGER NOT NULL DEFAULT 1,
+                        PRIMARY KEY (skill_name, source_tier)
+                    )
+                """)
+                conn.execute("""
+                    INSERT OR REPLACE INTO skills_sidecar_migrated
+                    (skill_name, skill_path, sha256, description, lead_paragraph, is_project_local, indexed_tokens, last_updated, source_root, source_tier)
+                    SELECT skill_name, skill_path, sha256, description, lead_paragraph, is_project_local, indexed_tokens, last_updated, source_root, source_tier
+                    FROM skills_sidecar
+                """)
+                conn.execute("DROP TABLE skills_sidecar")
+                conn.execute("ALTER TABLE skills_sidecar_migrated RENAME TO skills_sidecar")
+
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_sha256 ON skills_sidecar(sha256)")
             conn.commit()
 
@@ -413,16 +457,20 @@ class SidecarIndex:
         Synchronizes skill metadata into SQLite index only when sha256 changes.
         Builds the in-memory BM25 index in sub-20ms.
         """
-        project_paths_set = {str(p.resolve()) for p in (project_local_paths or [])}
+        project_paths_set = {
+            os.path.abspath(str(p)) for p in (project_local_paths or [])
+        } | {
+            str(Path(p).resolve()) for p in (project_local_paths or [])
+        }
         updated_count = 0
         source_info = source_info or {}
         skill_names = skill_names or {}
-        seen_names = set()
+        seen_names_by_tier: Dict[int, Set[str]] = {}
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             existing = {
-                row[0]: (row[1], row[2], row[3], row[4], row[5])
+                (row[0], int(row[5])): (row[1], row[2], row[3], row[4])
                 for row in cursor.execute("SELECT skill_name, sha256, is_project_local, skill_path, source_root, source_tier FROM skills_sidecar")
             }
 
@@ -434,15 +482,18 @@ class SidecarIndex:
                     content = p.read_text(encoding="utf-8", errors="ignore")
                 except Exception:
                     continue
-                seen_names.add(skill_name)
 
                 sha = compute_sha256(content)
-                is_local = 1 if str(p.resolve()) in project_paths_set else 0
-                source_tier, source_root = source_info.get(p, (0 if is_local else 1, p.parent.parent))
-                source_root = str(Path(source_root).resolve())
+                lex_p = os.path.abspath(str(p))
+                res_p = str(p.resolve())
+                is_local = 1 if (lex_p in project_paths_set or res_p in project_paths_set) else 0
+                raw_tier, raw_root = source_info.get(p, (0 if is_local else 1, p.parent.parent))
+                source_tier = int(raw_tier)
+                source_root = os.path.abspath(str(raw_root))
+                seen_names_by_tier.setdefault(source_tier, set()).add(skill_name)
 
-                old = existing.get(skill_name)
-                if old and old[0] == sha and old[1] == is_local and old[2] == str(p.resolve()) and old[3] == source_root and old[4] == source_tier:
+                old = existing.get((skill_name, source_tier))
+                if old and old[0] == sha and old[1] == is_local and old[2] == lex_p and old[3] == source_root:
                     continue  # Unchanged, skip disk parsing
 
                 if old and old[0] == sha:
@@ -452,10 +503,10 @@ class SidecarIndex:
                 tokens = len(content.split()) + len(content) // 4
 
                 cursor.execute("""
-                    INSERT INTO skills_sidecar 
+                    INSERT INTO skills_sidecar
                     (skill_name, skill_path, sha256, description, lead_paragraph, is_project_local, indexed_tokens, last_updated, source_root, source_tier)
                     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
-                    ON CONFLICT(skill_name) DO UPDATE SET
+                    ON CONFLICT(skill_name, source_tier) DO UPDATE SET
                         skill_path=excluded.skill_path,
                         sha256=excluded.sha256,
                         description=COALESCE(excluded.description, skills_sidecar.description),
@@ -463,30 +514,44 @@ class SidecarIndex:
                         is_project_local=excluded.is_project_local,
                         indexed_tokens=excluded.indexed_tokens,
                         source_root=excluded.source_root,
-                        source_tier=excluded.source_tier,
                         last_updated=CURRENT_TIMESTAMP
-                """, (skill_name, str(p.resolve()), sha, desc, lead, is_local, tokens, source_root, source_tier))
+                """, (skill_name, lex_p, sha, desc, lead, is_local, tokens, source_root, source_tier))
                 updated_count += 1
 
             if replace_tiers:
-                if seen_names:
-                    placeholders = ",".join("?" for _ in replace_tiers)
-                    name_placeholders = ",".join("?" for _ in seen_names)
-                    cursor.execute(
-                        f"DELETE FROM skills_sidecar WHERE source_tier IN ({placeholders}) AND skill_name NOT IN ({name_placeholders})",
-                        (*replace_tiers, *seen_names),
-                    )
-                else:
-                    placeholders = ",".join("?" for _ in replace_tiers)
-                    cursor.execute(f"DELETE FROM skills_sidecar WHERE source_tier IN ({placeholders})", tuple(replace_tiers))
+                for tier in replace_tiers:
+                    names_in_tier = seen_names_by_tier.get(int(tier))
+                    if names_in_tier:
+                        name_placeholders = ",".join("?" for _ in names_in_tier)
+                        cursor.execute(
+                            f"DELETE FROM skills_sidecar WHERE source_tier = ? AND skill_name NOT IN ({name_placeholders})",
+                            (int(tier), *names_in_tier),
+                        )
+                    else:
+                        cursor.execute("DELETE FROM skills_sidecar WHERE source_tier = ?", (int(tier),))
 
             if replace_subtrees:
-                current_paths = {str(Path(p).resolve()) for p in skill_paths if p.is_file()}
-                for row in cursor.execute("SELECT skill_name, skill_path FROM skills_sidecar").fetchall():
-                    existing_path = Path(row[1]).resolve()
-                    in_scope = any(existing_path.is_relative_to(Path(scope).resolve()) for scope in replace_subtrees)
-                    if in_scope and str(existing_path) not in current_paths:
-                        cursor.execute("DELETE FROM skills_sidecar WHERE skill_name = ?", (row[0],))
+                current_paths = {
+                    os.path.abspath(str(p)) for p in skill_paths if p.is_file()
+                } | {
+                    str(Path(p).resolve()) for p in skill_paths if p.is_file()
+                }
+                scope_lex = [Path(os.path.abspath(str(scope))) for scope in replace_subtrees]
+                scope_res = [Path(scope).resolve() for scope in replace_subtrees]
+                for s_name, s_path, s_tier in cursor.execute(
+                    "SELECT skill_name, skill_path, source_tier FROM skills_sidecar"
+                ).fetchall():
+                    existing_lex = Path(os.path.abspath(str(s_path)))
+                    existing_res = existing_lex.resolve()
+                    in_scope = any(
+                        existing_lex.is_relative_to(sc) or existing_res.is_relative_to(sr)
+                        for sc, sr in zip(scope_lex, scope_res)
+                    )
+                    if in_scope and str(existing_lex) not in current_paths and str(existing_res) not in current_paths:
+                        cursor.execute(
+                            "DELETE FROM skills_sidecar WHERE skill_name = ? AND source_tier = ?",
+                            (s_name, s_tier),
+                        )
 
             conn.commit()
 
@@ -503,13 +568,17 @@ class SidecarIndex:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             rows = cursor.execute("""
-                SELECT skill_name, skill_path, sha256, description, lead_paragraph, is_project_local, indexed_tokens
+                SELECT skill_name, skill_path, sha256, description, lead_paragraph, is_project_local, indexed_tokens, source_tier
                 FROM skills_sidecar
+                ORDER BY source_tier ASC, skill_name ASC
             """).fetchall()
 
-        self.n_docs = len(rows)
+        self.n_docs = 0
         self.total_catalog_tokens = 0
-        for name, path, sha, desc, lead, is_local, idx_toks in rows:
+        for name, path, sha, desc, lead, is_local, idx_toks, _tier in rows:
+            if name in self._candidates:
+                continue  # Keep highest-precedence tier (lowest source_tier) active without duplicating stats
+            self.n_docs += 1
             self.total_catalog_tokens += int(idx_toks or 0)
             candidate = SkillCandidate(
                 name=name,

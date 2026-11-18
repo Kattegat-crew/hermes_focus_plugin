@@ -75,21 +75,30 @@ def extract_message_text(user_message: Any) -> str:
     """
     if isinstance(user_message, str):
         return user_message.strip()
-    if isinstance(user_message, list):
+    if isinstance(user_message, (list, tuple)):
         parts = []
         for item in user_message:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                val = item.get("text") or item.get("content")
-                if isinstance(val, str):
-                    parts.append(val)
+            chunk = extract_message_text(item)
+            if chunk:
+                parts.append(chunk)
         return " ".join(parts).strip()
     if isinstance(user_message, dict):
-        val = user_message.get("text") or user_message.get("content")
-        if isinstance(val, str):
-            return val.strip()
-    return str(user_message or "").strip()
+        # Extract human text/caption while discarding binary/base64 media payloads (never str(dict))
+        for key in ("text", "input_text", "caption"):
+            val = user_message.get(key)
+            if isinstance(val, str):
+                stripped = val.strip()
+                if stripped and not stripped.startswith("data:"):
+                    return stripped
+        for container_key in ("content", "parts"):
+            if container_key in user_message and user_message[container_key] is not None:
+                nested = extract_message_text(user_message[container_key])
+                if nested:
+                    return nested
+        return ""
+    if user_message is None:
+        return ""
+    return str(user_message).strip()
 
 
 def discover_all_skill_paths(hermes_home: Path, cwd: Optional[Path] = None) -> Tuple[List[Path], List[Path]]:
@@ -99,14 +108,41 @@ def discover_all_skill_paths(hermes_home: Path, cwd: Optional[Path] = None) -> T
     return [p for p in paths if p not in project_set], project_paths
 
 
+def _get_receipt_emitter(ctx: Any = None) -> ReceiptEmitter:
+    """Resolve ReceiptEmitter without triggering sidecar skill discovery or sync."""
+    global _config, _receipt_emitter
+    if ctx is not None:
+        cfg = PluginConfig.load_from_ctx(ctx)
+        _config = cfg
+    elif _config is not None:
+        cfg = _config
+    else:
+        cfg = PluginConfig.load_from_ctx(None)
+        _config = cfg
+
+    if _receipt_emitter is None or getattr(_receipt_emitter, "receipts_path", None) != cfg.receipts_path:
+        _receipt_emitter = ReceiptEmitter(receipts_path=cfg.receipts_path)
+    return _receipt_emitter
+
+
 def _get_services(ctx: Any = None):
     global _config, _sidecar, _triage, _coordinator, _receipt_emitter
-    if _config is None:
-        _config = PluginConfig.load_from_ctx(ctx)
-    if _sidecar is None:
-        _sidecar = SidecarIndex(db_path=_config.sidecar_db_path)
+    prev_config = _config
+    if ctx is not None:
+        new_config = PluginConfig.load_from_ctx(ctx)
+        _config = new_config
+    else:
+        if _config is None:
+            _config = PluginConfig.load_from_ctx(None)
+        new_config = _config
+
+    sidecar_recreated = False
+    if _sidecar is None or (prev_config is not None and new_config.sidecar_db_path != prev_config.sidecar_db_path):
+        _sidecar = SidecarIndex(db_path=new_config.sidecar_db_path)
+        sidecar_recreated = True
+
     paths, project_paths, source_info, names, tiers = discover_skill_inventory(
-        include_project=_config.software_inspection_enabled
+        include_project=new_config.software_inspection_enabled
     )
     _sidecar.sync_skills(
         paths,
@@ -115,12 +151,21 @@ def _get_services(ctx: Any = None):
         skill_names=names,
         replace_tiers=tiers,
     )
-    if _triage is None:
-        _triage = CognitiveTriage(ctx=ctx, timeout_ms=_config.timeout_ms)
-    if _coordinator is None:
-        _coordinator = ContextCoordinator(config=_config, sidecar=_sidecar, ctx=ctx)
-    if _receipt_emitter is None:
-        _receipt_emitter = ReceiptEmitter(receipts_path=_config.receipts_path)
+
+    triage_changed = prev_config is not None and new_config.timeout_ms != prev_config.timeout_ms
+    if _triage is None or triage_changed:
+        _triage = CognitiveTriage(ctx=ctx, timeout_ms=new_config.timeout_ms)
+    elif ctx is not None and hasattr(_triage, "ctx"):
+        _triage.ctx = ctx
+
+    coordinator_changed = prev_config is not None and new_config != prev_config
+    if _coordinator is None or sidecar_recreated or coordinator_changed:
+        _coordinator = ContextCoordinator(config=new_config, sidecar=_sidecar, ctx=ctx)
+    elif ctx is not None and hasattr(_coordinator, "ctx"):
+        _coordinator.ctx = ctx
+
+    if _receipt_emitter is None or getattr(_receipt_emitter, "receipts_path", None) != new_config.receipts_path:
+        _receipt_emitter = ReceiptEmitter(receipts_path=new_config.receipts_path)
 
     return _config, _sidecar, _triage, _coordinator, _receipt_emitter
 
@@ -133,35 +178,38 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
     """
     global _session_turns, _config
     ctx = kwargs.get("_ctx")
-    if _config is None:
-        _config = PluginConfig.load_from_ctx(ctx)
+    turn_config = PluginConfig.load_from_ctx(ctx) if ctx is not None else (_config or PluginConfig.load_from_ctx(None))
 
-    if not _config.enabled or not _config.pre_hook_enabled:
+    if not turn_config.enabled or not turn_config.pre_hook_enabled:
+        if ctx is not None:
+            _config = turn_config
         return None
 
     text = extract_message_text(user_message)
-    if not text:
+    if not text or text.lstrip().startswith("/"):
         return None
 
     turn_id = str(kwargs.get("turn_id", ""))
     session_id = str(kwargs.get("session_id", ""))
     turn_key = f"{session_id}:{turn_id}"
 
-    platform = str(kwargs.get("platform") or getattr(getattr(ctx, "agent", None), "platform", None) or "cli").lower()
-    model_name = str(kwargs.get("model") or getattr(getattr(ctx, "agent", None), "model", None) or "").strip()
+    platform = str(kwargs.get("platform") or "cli").lower()
+    model_name = str(kwargs.get("model") or "").strip()
 
     try:
         config, sidecar, triage, coordinator, _ = _get_services(ctx)
-        turn_config = PluginConfig.load_from_ctx(ctx) if ctx is not None else config
         cwd = kwargs.get("cwd") or _ctx_cwd(ctx)
         analyze_kwargs: Dict[str, Any] = {
-            "software_inspection_enabled": turn_config.software_inspection_enabled
+            "software_inspection_enabled": config.software_inspection_enabled
         }
         try:
             import inspect
             sig = inspect.signature(triage.analyze)
-            if "project_scan_paths" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                analyze_kwargs["project_scan_paths"] = turn_config.project_scan_paths
+            has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+            if "project_scan_paths" in sig.parameters or has_varkw:
+                analyze_kwargs["project_scan_paths"] = config.project_scan_paths
+            if "conversation_history" in kwargs and ("conversation_history" in sig.parameters or has_varkw):
+                analyze_kwargs["conversation_history"] = kwargs.get("conversation_history")
         except Exception:
             pass
 
@@ -176,9 +224,10 @@ def on_pre_llm_call(user_message: Any = None, **kwargs: Any) -> Optional[Dict[st
             user_message=text,
             cwd=effective_cwd,
             session_id=session_id or None,
-            memory_db_uri=turn_config.memory_db_uri,
-            extra_memory_dirs=turn_config.extra_memory_dirs,
-            excluded_session_sources=turn_config.excluded_session_sources,
+            memory_db_uri=config.memory_db_uri,
+            extra_memory_dirs=config.extra_memory_dirs,
+            excluded_session_sources=config.excluded_session_sources,
+            excluded_message_prefixes=config.excluded_message_prefixes,
         )
 
         # Store session/turn state isolated from concurrent sessions (bounded to 256 entries)
@@ -218,7 +267,7 @@ def on_post_llm_call(response: Any = None, **kwargs: Any) -> None:
 
     try:
         ctx = kwargs.get("_ctx")
-        _, _, _, _, receipt_emitter = _get_services(ctx)
+        receipt_emitter = _get_receipt_emitter(ctx)
         receipt_emitter.record_turn(
             turn_id=turn_id,
             session_id=session_id,
@@ -275,38 +324,58 @@ def register(ctx: Any) -> None:
         )
 
         def focus_route_tool(args: dict, **kw: Any) -> str:
-            query = args.get("query", "")
+            query = extract_message_text(args.get("query", ""))
             if not query:
                 return "Error: query is required."
-            cfg, _, triage, coordinator, _ = _get_services(ctx)
-            turn_config = PluginConfig.load_from_ctx(ctx) if ctx is not None else cfg
-            cwd = kw.get("cwd") or _ctx_cwd(ctx)
-            tool_kwargs: Dict[str, Any] = {
-                "software_inspection_enabled": turn_config.software_inspection_enabled
-            }
-            try:
-                import inspect
-                sig = inspect.signature(triage.analyze)
-                if "project_scan_paths" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                    tool_kwargs["project_scan_paths"] = turn_config.project_scan_paths
-            except Exception:
-                pass
+            turn_config = PluginConfig.load_from_ctx(ctx) if ctx is not None else (_config or PluginConfig.load_from_ctx(None))
+            if not turn_config.enabled:
+                return "Focus Context Engine Disabled (enabled=false)."
 
-            analysis = triage.analyze(query, cwd=cwd, **tool_kwargs)
-            effective_cwd = (
-                analysis.domain.resolved_workspace_path
-                if (analysis.domain and analysis.domain.resolved_workspace_path)
-                else cwd
-            )
-            result = coordinator.execute(
-                analysis, user_message=query, cwd=effective_cwd, session_id=args.get("session_id") or kw.get("session_id")
-            )
-            selected = (
-                ", ".join(s.name for s in result.selected_skills)
-                if result.selected_skills
-                else (result.selected_skill.name if result.selected_skill else "None")
-            )
-            return f"Route Result -> Winner: {selected} | Latency: {result.triage_latency_ms:.1f}ms | Status: {result.status}"
+            try:
+                cfg, _, triage, coordinator, _ = _get_services(ctx)
+                cwd = kw.get("cwd") or _ctx_cwd(ctx)
+                tool_kwargs: Dict[str, Any] = {
+                    "software_inspection_enabled": cfg.software_inspection_enabled
+                }
+                history = args.get("conversation_history") if isinstance(args, dict) else None
+                if history is None:
+                    history = kw.get("conversation_history")
+                try:
+                    import inspect
+                    sig = inspect.signature(triage.analyze)
+                    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                    if "project_scan_paths" in sig.parameters or has_varkw:
+                        tool_kwargs["project_scan_paths"] = cfg.project_scan_paths
+                    if history is not None and ("conversation_history" in sig.parameters or has_varkw):
+                        tool_kwargs["conversation_history"] = history
+                except Exception:
+                    pass
+
+                analysis = triage.analyze(query, cwd=cwd, **tool_kwargs)
+                effective_cwd = (
+                    analysis.domain.resolved_workspace_path
+                    if (analysis.domain and analysis.domain.resolved_workspace_path)
+                    else cwd
+                )
+                result = coordinator.execute(
+                    analysis,
+                    user_message=query,
+                    cwd=effective_cwd,
+                    session_id=(args.get("session_id") if isinstance(args, dict) else None) or kw.get("session_id"),
+                    memory_db_uri=cfg.memory_db_uri,
+                    extra_memory_dirs=cfg.extra_memory_dirs,
+                    excluded_session_sources=cfg.excluded_session_sources,
+                    excluded_message_prefixes=cfg.excluded_message_prefixes,
+                )
+                selected = (
+                    ", ".join(s.name for s in result.selected_skills)
+                    if result.selected_skills
+                    else (result.selected_skill.name if result.selected_skill else "None")
+                )
+                return f"Route Result -> Winner: {selected} | Latency: {result.triage_latency_ms:.1f}ms | Status: {result.status}"
+            except Exception as exc:
+                logger.warning("focus_route tool error (fail-closed): %s", exc)
+                return f"Route Result -> Winner: None | Status: error ({type(exc).__name__})"
 
         route_schema = {
             "name": "focus_route",

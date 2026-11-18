@@ -139,21 +139,44 @@ def _load_file_fact_nodes(fpath: Path) -> List[_MemoryFactNode]:
     nodes: List[_MemoryFactNode] = []
     current_heading: Optional[str] = None
     current_level: int = 0
+    fence_char: Optional[str] = None
+    fence_len: int = 0
 
     for line in content.splitlines():
         trimmed = line.strip()
         if not trimmed:
             continue
-        if trimmed.startswith("#"):
-            hashes = len(trimmed) - len(trimmed.lstrip("#"))
-            heading_raw = trimmed.lstrip("#").strip()
-            if heading_raw:
-                current_heading = heading_raw
-                current_level = hashes
-            elif current_heading and hashes <= current_level:
+
+        fence_match = re.match(r"^(`{3,}|~{3,})(.*)$", trimmed)
+        if fence_match:
+            marker = fence_match.group(1)
+            trailing = fence_match.group(2)
+            if fence_char is None:
+                if not (marker[0] == "`" and "`" in trailing):
+                    fence_char = marker[0]
+                    fence_len = len(marker)
+                    continue
+            elif marker[0] == fence_char and len(marker) >= fence_len and not trailing.strip():
+                fence_char = None
+                fence_len = 0
+                continue
+
+        if fence_char is None:
+            if trimmed == "§":
                 current_heading = None
                 current_level = 0
-            continue
+                continue
+            heading_match = re.match(r"^(#{1,6})\s+(\S.*)$", trimmed)
+            if heading_match:
+                hashes = len(heading_match.group(1))
+                heading_raw = heading_match.group(2).strip()
+                if heading_raw:
+                    current_heading = heading_raw
+                    current_level = hashes
+                elif current_heading and hashes <= current_level:
+                    current_heading = None
+                    current_level = 0
+                continue
 
         if len(trimmed) < 8 or _INJECTION_PATTERNS.search(trimmed):
             continue
@@ -342,47 +365,21 @@ def _escape_sql_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+DEFAULT_EXCLUDED_SESSION_SOURCES: Tuple[str, ...] = ("kanban", "subagent", "tool")
+DEFAULT_EXCLUDED_MESSAGE_PREFIXES: Tuple[str, ...] = ("[CONTEXT COMPACTION", "[CONTEXT SUMMARY]:")
+
+
 def _resolve_memory_db_password() -> Optional[str]:
-    """Resolve external memory database password honoring Hermes profile secret scope."""
+    """Resolve external memory database password strictly via Hermes profile secret scope."""
     try:
         from agent.secret_scope import get_secret
+    except ImportError:
+        return None
 
-        val = get_secret("FOCUS_MEMORY_DB_PASSWORD")
-        if val is not None and str(val).strip():
-            return str(val).strip()
-    except Exception:
-        pass
-    val = os.environ.get("FOCUS_MEMORY_DB_PASSWORD", "").strip()
-    return val if val else None
-
-
-def _get_host_excluded_session_sources() -> Set[str]:
-    """Dynamically query the active Hermes host for non-interactive / automated session sources.
-    Avoids hardcoding static source lists in the plugin, delegating authority to Hermes core
-    or custom profile configurations."""
-    try:
-        from tools import session_search_tool
-
-        sources = getattr(session_search_tool, "_HIDDEN_SESSION_SOURCES", None)
-        if sources and isinstance(sources, (list, tuple, set)):
-            return {str(s).strip().lower() for s in sources if str(s).strip()}
-    except Exception:
-        pass
-    return set()
-
-
-def _get_host_compaction_prefixes() -> Tuple[str, ...]:
-    """Dynamically query the active Hermes host for compaction/summary message prefixes.
-    Avoids hardcoding language-specific strings in the plugin engine."""
-    try:
-        from tools import session_search_tool
-
-        prefixes = getattr(session_search_tool, "_COMPACTION_PREFIXES", None)
-        if prefixes and isinstance(prefixes, (list, tuple, set)):
-            return tuple(str(p) for p in prefixes if str(p).strip())
-    except Exception:
-        pass
-    return ()
+    val = get_secret("FOCUS_MEMORY_DB_PASSWORD")
+    if val is not None and str(val).strip():
+        return str(val).strip()
+    return None
 
 
 class SelectiveMemoryRetriever:
@@ -402,14 +399,28 @@ class SelectiveMemoryRetriever:
         memory_db_uri: str = "",
         extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
         excluded_session_sources: Optional[List[str]] = None,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ):
         self.token_budget = token_budget  # 0 = unlimited by default, preserves full context
         self.memory_db_uri = memory_db_uri
         self.extra_memory_dirs = [
             Path(p) for p in (extra_memory_dirs or []) if str(p).strip()
         ]
+        source_list = (
+            DEFAULT_EXCLUDED_SESSION_SOURCES
+            if excluded_session_sources is None
+            else excluded_session_sources
+        )
         self.excluded_session_sources = [
-            str(s).strip().lower() for s in (excluded_session_sources or []) if str(s).strip()
+            str(s).strip().lower() for s in source_list if str(s).strip()
+        ]
+        prefix_list = (
+            DEFAULT_EXCLUDED_MESSAGE_PREFIXES
+            if excluded_message_prefixes is None
+            else excluded_message_prefixes
+        )
+        self.excluded_message_prefixes = [
+            str(p).strip() for p in prefix_list if str(p).strip()
         ]
 
     def retrieve(
@@ -421,6 +432,7 @@ class SelectiveMemoryRetriever:
         memory_db_uri: Optional[str] = None,
         extra_memory_dirs: Optional[List[Union[str, Path]]] = None,
         excluded_session_sources: Optional[List[str]] = None,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ) -> List[MemoryItem]:
         clean_entities = [e.strip() for e in (entities or []) if len(e.strip()) >= 2]
         if probe and probe.entity and probe.entity.strip() not in clean_entities:
@@ -621,6 +633,11 @@ class SelectiveMemoryRetriever:
             if excluded_session_sources is not None
             else self.excluded_session_sources
         )
+        effective_excluded_prefixes = (
+            [str(p).strip() for p in excluded_message_prefixes if str(p).strip()]
+            if excluded_message_prefixes is not None
+            else self.excluded_message_prefixes
+        )
 
         for db_path in sqlite_candidates:
             for node in self._extract_sqlite_fact_nodes(
@@ -630,6 +647,7 @@ class SelectiveMemoryRetriever:
                 specific_topic_terms=specific_topic_terms,
                 active_session_id=session_id,
                 excluded_session_sources=effective_excluded_sources,
+                excluded_message_prefixes=effective_excluded_prefixes,
             ):
                 _register_node(node)
 
@@ -638,6 +656,8 @@ class SelectiveMemoryRetriever:
                 db_uri,
                 clean_entities=clean_entities,
                 topic_terms=topic_terms,
+                excluded_session_sources=effective_excluded_sources,
+                excluded_message_prefixes=effective_excluded_prefixes,
             ):
                 _register_node(node)
 
@@ -993,12 +1013,17 @@ class SelectiveMemoryRetriever:
         section_entity: Optional[str] = None,
         timestamp_val: Any = None,
         max_chars: int = 800,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ) -> Optional[_MemoryFactNode]:
         val = " ".join(str(raw_text or "").split()).strip()
         if len(val) < 10 or _INJECTION_PATTERNS.search(val):
             return None
-        host_compaction = _get_host_compaction_prefixes()
-        if host_compaction and any(val.startswith(p) for p in host_compaction):
+        effective_prefixes = (
+            [str(p).strip() for p in excluded_message_prefixes if str(p).strip()]
+            if excluded_message_prefixes is not None
+            else self.excluded_message_prefixes
+        )
+        if effective_prefixes and any(val.startswith(p) for p in effective_prefixes):
             return None
         if len(val) > max_chars:
             val = val[:max_chars].rstrip() + "..."
@@ -1024,6 +1049,7 @@ class SelectiveMemoryRetriever:
         specific_topic_terms: Optional[List[str]] = None,
         active_session_id: Optional[str] = None,
         excluded_session_sources: Optional[List[str]] = None,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ) -> List[_MemoryFactNode]:
         """
         Read-only universal SQLite adapter:
@@ -1067,6 +1093,7 @@ class SelectiveMemoryRetriever:
                                 specific_topic_terms=specific_topic_terms,
                                 active_session_id=active_session_id,
                                 excluded_session_sources=excluded_session_sources,
+                                excluded_message_prefixes=excluded_message_prefixes,
                             )
                         )
 
@@ -1089,6 +1116,7 @@ class SelectiveMemoryRetriever:
                             search_terms,
                             clean_entities=clean_entities,
                             specific_topic_terms=specific_topic_terms,
+                            excluded_message_prefixes=excluded_message_prefixes,
                         )
                     )
         except Exception:
@@ -1106,6 +1134,7 @@ class SelectiveMemoryRetriever:
         specific_topic_terms: Optional[List[str]] = None,
         active_session_id: Optional[str] = None,
         excluded_session_sources: Optional[List[str]] = None,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ) -> List[_MemoryFactNode]:
         nodes: List[_MemoryFactNode] = []
         seen_contents: Set[str] = set()
@@ -1142,13 +1171,15 @@ class SelectiveMemoryRetriever:
                 cursor.execute(f'PRAGMA table_info("{table_set_lower["sessions"]}")')
                 sess_cols = {str(r[1]).lower() for r in cursor.fetchall()}
                 if "source" in sess_cols:
-                    effective_excluded = set(
-                        excluded_session_sources
-                        if excluded_session_sources is not None
-                        else self.excluded_session_sources
-                    )
-                    if not effective_excluded:
-                        effective_excluded = _get_host_excluded_session_sources()
+                    effective_excluded = {
+                        str(s).strip().lower()
+                        for s in (
+                            excluded_session_sources
+                            if excluded_session_sources is not None
+                            else self.excluded_session_sources
+                        )
+                        if str(s).strip()
+                    }
                     if effective_excluded:
                         placeholders = ", ".join("?" for _ in effective_excluded)
                         where_clauses.append(f"(s.source IS NULL OR lower(s.source) NOT IN ({placeholders}))")
@@ -1191,6 +1222,7 @@ class SelectiveMemoryRetriever:
                                     source_label=f"{db_name}:{msg_table}",
                                     section_entity=str(sess_title).strip() if sess_title else None,
                                     timestamp_val=ts_val,
+                                    excluded_message_prefixes=excluded_message_prefixes,
                                 )
                                 if node is not None:
                                     nodes.append(node)
@@ -1220,6 +1252,7 @@ class SelectiveMemoryRetriever:
                                     source_label=f"{db_name}:{msg_table}",
                                     section_entity=str(sess_title).strip() if sess_title else None,
                                     timestamp_val=ts_val,
+                                    excluded_message_prefixes=excluded_message_prefixes,
                                 )
                                 if node is not None:
                                     nodes.append(node)
@@ -1251,6 +1284,7 @@ class SelectiveMemoryRetriever:
         search_terms: List[str],
         clean_entities: Optional[List[str]] = None,
         specific_topic_terms: Optional[List[str]] = None,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ) -> List[_MemoryFactNode]:
         nodes: List[_MemoryFactNode] = []
         seen_contents: Set[str] = set()
@@ -1322,6 +1356,7 @@ class SelectiveMemoryRetriever:
                     source_label=f"{db_name}:{table_name}",
                     section_entity=ent_val or None,
                     timestamp_val=ts_val,
+                    excluded_message_prefixes=excluded_message_prefixes,
                 )
                 if node is not None:
                     nodes.append(node)
@@ -1425,6 +1460,8 @@ class SelectiveMemoryRetriever:
         db_uri: str,
         clean_entities: List[str],
         topic_terms: List[str],
+        excluded_session_sources: Optional[List[str]] = None,
+        excluded_message_prefixes: Optional[List[str]] = None,
     ) -> List[_MemoryFactNode]:
         """
         SELECT-only adapter for external user-ecosystem databases configured via URI
@@ -1439,6 +1476,8 @@ class SelectiveMemoryRetriever:
                     local_path,
                     clean_entities=clean_entities,
                     topic_terms=topic_terms,
+                    excluded_session_sources=excluded_session_sources,
+                    excluded_message_prefixes=excluded_message_prefixes,
                 )
             return []
 
@@ -1538,6 +1577,7 @@ class SelectiveMemoryRetriever:
                             source_label=f"external_db:{tbl}",
                             section_entity=ent_val or None,
                             timestamp_val=ts_val,
+                            excluded_message_prefixes=excluded_message_prefixes,
                         )
                         if node is not None:
                             nodes.append(node)
